@@ -278,9 +278,3 @@ Architecture is frozen for the current sprint. If you'd like to contribute:
 2. Open an issue to discuss proposed changes
 3. Follow the existing coding style (frozen dataclasses, strict typing, no clever code)
 4. Ensure all tests pass
-
----
-
-## License
-
-Licensed under the MIT License. See `LICENSE` for details.
