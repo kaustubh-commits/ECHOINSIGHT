@@ -54,6 +54,19 @@ Domain → (nothing in project)
 
 **The golden rule:** Dependencies always point **downward**. Never upward, never sideways from config/domain to app.
 
+### Architectural Philosophy
+
+EchoInsight's primary optimisation target is **trustworthy musical intelligence**. Correctness is a prerequisite, not the goal. Every architectural decision prioritises:
+
+- **Deterministic analysis** — the same input always produces the same output
+- **Explainability** — every result includes a human-readable rationale
+- **Reproducibility** — extraction provenance is recorded in every SongDNA
+- **Validation** — invalid domain state is unrepresentable by construction
+- **Explicit contracts** — typed result objects for all inter-service communication
+- **Schema evolution** — backward-compatible data migration paths
+
+These principles are documented in detail in the Architecture Decision Records ([ADR-0001](docs/adr/ADR-0001.md) through [ADR-0007](docs/adr/ADR-0007.md)).
+
 ---
 
 ## 2. Layer Rules and Dependency Direction
@@ -65,7 +78,7 @@ Domain → (nothing in project)
 | `src.core/` must never import `src.config/`, `src.app/`, or `src/analysis/` | CI test + code review |
 | `src.config/` must never import `src.core/`, `src.app/`, or `src/analysis/` | CI test + code review |
 | `src.app/` may import everything (it is the composition root) | Convention |
-| `src/analysis/` may import `src.core/` but never `src.app/` or `src/config/` | Code review |
+| `src.analysis/` may import `src.core/` but never `src.app/` or `src/config/` | Code review |
 
 ### 2.2 Dependency Injection
 
@@ -87,20 +100,38 @@ Domain → (nothing in project)
 
 ### 3.1 Responsibility
 
-Define the pure data models that represent the core business concepts of EchoInsight.
+Define the pure data models that represent the core business concepts of EchoInsight. The domain layer imports only the Python standard library — no librosa, no numpy, no external packages.
 
-### 3.2 Current Contents
+### 3.2 Domain Model Structure
 
-| File | Contents | Status |
-|------|----------|--------|
-| `src/core/dna_schema.py` | `SongDNA`, `SongMetadata`, `RhythmDNA`, `TimbreDNA`, `TonalDNA`, `StructureDNA`, `Segment`, `IntelligenceDNA`, `StemDNA` | **Active** |
-| `src/core/__init__.py` | Re-exports all schema classes | Active |
+The domain is built around a single aggregate root:
+
+```
+SongDNA  (aggregate root)
+ ├── SongMetadata     — song ID, duration, sample rate, format
+ ├── SongSummary      — song-level aggregates for fast filtering
+ ├── StructureDNA     — macro-structural organisation
+ │    └── SegmentDNA[] — individual sections (verse, chorus, etc.)
+ │         ├── SegmentTiming    — start/end time, beat positions
+ │         ├── SegmentDSP       — per-segment rhythm, harmony, timbre
+ │         └── SegmentContext   — label, repetition role, confidence
+ ├── FrameReference   — URI to binary frame-level arrays (NPZ)
+ └── AnalysisManifest — extraction provenance record
+```
+
+All domain objects are **frozen dataclasses** — immutable, hashable, and directly serialisable to JSON via `dataclasses.asdict()`. Validation occurs during object construction. Invalid domain objects cannot exist (see [ADR-0002](docs/adr/ADR-0002.md), [ADR-0005](docs/adr/ADR-0005.md)).
+
+Key design decisions in the domain model:
+
+- **SegmentDSP composition** — rhythmic, harmonic, and timbral features are organised into three sub-objects rather than a flat field list. See [ADR-0003](docs/adr/ADR-0003.md).
+- **Segment identity** — each `SegmentDNA` carries a `song_id` to enable the comparison engine to return segments without loading their parent aggregate. See [ADR-0004](docs/adr/ADR-0004.md).
+- **Per-aggregate schema versioning** — each data type carries an independent `schema_version` string to enable backward-compatible migration. See [ADR-0007](docs/adr/ADR-0007.md).
 
 ### 3.3 What Belongs Here
 
 - Data types (`dataclass` or plain classes).
 - Value objects (immutable, equality-comparable).
-- Validation logic that applies to the type itself (e.g., `__post_init__` checks).
+- Validation logic that applies to the type itself (`__post_init__` checks).
 - Type aliases, enums, constants that are part of the domain model.
 
 ### 3.4 What Must Never Be Here
@@ -111,12 +142,7 @@ Define the pure data models that represent the core business concepts of EchoIns
 - Framework imports (librosa, numpy, matplotlib, etc.).
 - Business logic that spans multiple domain objects.
 - Path manipulation or path storage.
-
-### 3.5 Future Additions
-
-- `FrameReference` — lightweight URI wrapper for frame-level data.
-- `BeatGrid` — beat position data type.
-- `Project` — user workspace model.
+- Comparison results, recommendation results, or any computation output.
 
 ---
 
@@ -146,7 +172,7 @@ Provide two kinds of configuration:
 
 ### 4.4 What Must Never Be Here
 
-- Domain types (`SongDNA`, `RhythmDNA`, etc.).
+- Domain types (`SongDNA`, `SegmentDNA`, etc.).
 - Analysis logic (extraction, comparison, validation).
 - Application runtime state.
 - Logger configuration (that belongs in `ApplicationContext`).
@@ -179,7 +205,7 @@ Compose and wire together all lower layers. Hold runtime state. Provide the boot
 - `ApplicationContext` — the runtime composition root.
 - Logger initialization.
 - Path resolution utilities.
-- Future: service wiring (DatasetManager, Workspace, SpotifyClient, etc.).
+- Future: service wiring for higher-level capabilities (dataset management, recommendation, etc.).
 
 ### 5.4 What Must Never Be Here
 
@@ -199,10 +225,6 @@ class ApplicationContext:
     preferences: UserPreferences
     logger: logging.Logger
     paths: PathsConfig
-
-    # Future services are attached as optional attributes:
-    # dataset_manager: Optional[DatasetManager] = None
-    # workspace: Optional[Workspace] = None
 ```
 
 New services are added as attributes and wired during construction. The context orchestrates — it does not contain business logic.
@@ -215,75 +237,82 @@ New services are added as attributes and wired during construction. The context 
 
 Implement all DSP, comparison, validation, and visualization logic. This is the "engine room" of EchoInsight.
 
-### 6.2 Current Contents
-
-| File | Contents | Status |
-|------|----------|--------|
-| `extractor.py` | `extract_song_dna()` — audio → SongDNA pipeline | Active |
-| `comparison.py` | `compare_songs()` — similarity engine v1 | Active |
-| `batch_generator.py` | `generate_dna_dataset()` — batch processing | Active |
-| `explorer.py` | `summarize_dataset()` — dataset statistics | Active |
-| `validate_comparison.py` | `run_validation()` — similarity matrix diagnostics | Active |
-| `visualization.py` | `generate_all_plots()` — PNG plot generation | Active |
-
-### 6.3 What Belongs Here
+### 6.2 What Belongs Here
 
 - All DSP and feature extraction logic.
 - Comparison algorithms and metrics.
+- Comparison result types (response contracts). See [ADR-0006](docs/adr/ADR-0006.md).
 - Validation and diagnostic frameworks.
 - Visualization generation.
 - Batch processing orchestration.
 
-### 6.4 What Must Never Be Here
+### 6.3 What Must Never Be Here
 
 - Application state or context.
 - User preferences reading (receive parameters explicitly).
 - Configuration defaults (import from `src.config.core` if needed).
 - Database or API access.
 
-### 6.5 Future Additions
+### 6.4 Current Modules
 
-- `frame_grid/` — FrameGrid extraction and storage.
-- `beat_grid/` — BeatGrid extraction and analysis.
-- `structure/` — StructureDNA segmentation.
-- `stems/` — Stem separation via Demucs.
-- `embeddings/` — Neural embedding extraction.
+The analysis layer contains modules for extraction, comparison (song-level and segment-level), validation, batch processing, and visualization. As the system grows, these concerns may be split into sub-packages following the pattern already established by `src/analysis/comparison/`.
 
 ---
 
 ## 7. Data Flow
 
+### Current pipeline (v1 schema)
+
 ```
 Audio File (MP3/WAV/FLAC/OGG/M4A)
     │
     ▼
-extractor.py :: extract_song_dna()
-    │  Uses librosa for all DSP
-    │  Produces SongDNA dataclass
+extractor.py — librosa DSP pipeline
+    │
     ▼
-SongDNA (src.core.dna_schema)
-    │  Frozen dataclass with validation
-    │  6 sub-components (3 populated, 3 placeholder)
+SongDNA (v1 schema — dna_schema.py)
+    │  Summary statistics + beat grid
+    │  Frame-level data stored as NPZ
     ▼
 dataclasses.asdict() + json.dumps()
-    │  Serialization to JSON file
+    │
     ▼
 SongDNA JSON (data/dna/*.json)
     │
-    ├──→ comparison.py :: compare_songs_from_dicts()
-    │       Loads JSON → reconstructs SongDNA → compares → ComparisonResult
-    │
-    ├──→ validate_comparison.py :: run_validation()
-    │       Builds N×N similarity matrix → diagnostics
-    │
-    ├──→ explorer.py :: summarize_dataset()
-    │       Prints dataset statistics
-    │
-    └──→ visualization.py :: generate_all_plots()
-            Saves PNG plots to data/plots/
+    ├──→ comparison engine
+    ├──→ validation diagnostics
+    ├──→ dataset exploration
+    └──→ plot generation
 ```
 
-### Application-Controlled Flow (Sprint 1+)
+### Planned pipeline (v2 schema)
+
+The v2 domain model (SongDNA with StructureDNA and SegmentDNA) has been implemented and tested. Once the extraction pipeline is migrated, the flow will include structural segmentation and per-segment DSP summaries:
+
+```
+Audio File
+    │
+    ▼
+Frame extraction (librosa)
+    │
+    ▼
+Structural segmentation
+    │
+    ▼
+Per-segment DSP computation
+    │
+    ▼
+SongDNA aggregate (v2 — song_dna.py + structure.py)
+    │
+    ├──→ segment-level comparison
+    ├──→ structural flow comparison
+    ├──→ search and recommendation
+    └──→ visualization
+```
+
+Downstream consumers never access raw audio directly. Every stage consumes structured data from the SongDNA representation.
+
+### Application bootstrap flow
 
 ```
 main.py :: bootstrap_application()
@@ -312,7 +341,8 @@ ApplicationContext
 | Import from `src.config`, `src.app`, `src.analysis` | Import only stdlib |
 | Read files or network | Accept data as constructor arguments |
 | Log anything | Raise exceptions for invalid state |
-| Store paths | Store domain URIs (handled by `FrameReference` in future) |
+| Store absolute paths | Store domain URIs via `FrameReference` |
+| Contain comparison or recommendation results | Those belong in Infrastructure or Services layers |
 
 ### Configuration Layer (`src/config/`)
 
@@ -365,30 +395,11 @@ ApplicationContext
 5. **Expose via CLI or API** in `main.py` or a future `cli/` module.
    - The CLI receives `ApplicationContext`, extracts needed config/preferences, and calls the service.
 
-### Example Future Wiring
-
-```python
-# src/app/context.py (future)
-class ApplicationContext:
-    def __init__(self, config, preferences, log_level=logging.INFO):
-        # ... existing init ...
-        self.dataset_manager: Optional[DatasetManager] = None
-        self.workspace: Optional[Workspace] = None
-        self.spotify_client: Optional[SpotifyClient] = None
-
-    def init_dataset_manager(self) -> DatasetManager:
-        from src.services.dataset_manager import DatasetManager
-        self.dataset_manager = DatasetManager(
-            data_root=self.preferences.data_root,
-            logger=self.logger.getChild("dataset"),
-        )
-        return self.dataset_manager
-```
-
 ---
 
 ## Appendix: Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 0.1.1 | 2026-07-22 | Updated domain model to v2; added SegmentDSP, segment identity, schema versioning; removed v1 references; added optimisation target |
 | 0.1.0 | 2026-07-12 | Initial architecture — four-tier layering, config, context, bootstrap |
