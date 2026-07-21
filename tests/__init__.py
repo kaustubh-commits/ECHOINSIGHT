@@ -1,0 +1,1 @@
+"""EchoInsight test suite."""

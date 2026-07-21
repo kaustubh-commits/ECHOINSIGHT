@@ -1,0 +1,17 @@
+# EchoInsight — ruff configuration
+#
+# Codifies the project's current lint standards.
+# Rules are intentionally limited to the sets already in use.
+# Do not add new rules without team agreement.
+
+line-length = 88
+target-version = "py310"
+
+[lint]
+# Select only the rule groups that were already implicitly enforced.
+# E501 (line-too-long) is intentionally excluded — pre-existing code
+# has descriptive docstrings / explanations that exceed 88 chars.
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]

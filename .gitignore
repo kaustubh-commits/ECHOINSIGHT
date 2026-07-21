@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+
+# Testing, linting, type checking
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+
+# Generated audio artifacts
+*.wav
+*.flac
+
+# Generated NumPy artifacts
+*.npy
+*.npz
+
+# EchoInsight — generated data directories
+data/raw/
+data/cache/
+data/tmp/
+
+# EchoInsight — generated frames (will live alongside dna in future)
+data/frames/
+
+# EchoInsight — auto-generated plots
+data/plots/
+
+# VS Code workspace storage (handled by .vscode/ above, but explicit for safety)
+.vscode/settings.json
