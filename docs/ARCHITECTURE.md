@@ -16,6 +16,7 @@
 7. [Data Flow](#7-data-flow)
 8. [Anti-Patterns — What Each Layer Must Never Do](#8-anti-patterns--what-each-layer-must-never-do)
 9. [Adding New Services](#9-adding-new-services)
+10. [Product Vision & Implementation Candidates](#10-product-vision--implementation-candidates)
 
 ---
 
@@ -30,15 +31,15 @@ EchoInsight uses a **strict four-tier layered architecture**:
 │  Knows about everything.                                    │
 ├─────────────────────────────────────────────────────────────┤
 │  INFRASTRUCTURE LAYER  (src.analysis/)                      │
-│  Feature extraction, comparison, validation, visualization   │
+│  Feature extraction, comparison, validation, visualization  │
 │  Knows about Domain.                                        │
 ├─────────────────────────────────────────────────────────────┤
 │  CONFIGURATION LAYER  (src.config/)                         │
-│  Immutable defaults + user-editable preferences              │
+│  Immutable defaults + user-editable preferences             │
 │  Knows about nothing in the project.                        │
 ├─────────────────────────────────────────────────────────────┤
 │  DOMAIN LAYER  (src/core/)                                  │
-│  SongDNA schema, pure data types                             │
+│  SongDNA schema, pure data types                            │
 │  Knows about nothing in the project.                        │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -205,7 +206,7 @@ Compose and wire together all lower layers. Hold runtime state. Provide the boot
 - `ApplicationContext` — the runtime composition root.
 - Logger initialization.
 - Path resolution utilities.
-- Future: service wiring for higher-level capabilities (dataset management, recommendation, etc.).
+- Future: service wiring for higher-level capabilities (Creative Workspace orchestration, etc.).
 
 ### 5.4 What Must Never Be Here
 
@@ -245,6 +246,7 @@ Implement all DSP, comparison, validation, and visualization logic. This is the 
 - Validation and diagnostic frameworks.
 - Visualization generation.
 - Batch processing orchestration.
+- Future: Segmentation, time-stretching, and beat-sync helpers.
 
 ### 6.3 What Must Never Be Here
 
@@ -261,13 +263,13 @@ The analysis layer contains modules for extraction, comparison (song-level and s
 
 ## 7. Data Flow
 
-### Current pipeline (v1 schema)
+### Current pipeline (v1 schema — to be migrated)
 
 ```
 Audio File (MP3/WAV/FLAC/OGG/M4A)
     │
     ▼
-extractor.py — librosa DSP pipeline
+extractor.py — librosa DSP pipeline (v1)
     │
     ▼
 SongDNA (v1 schema — dna_schema.py)
@@ -279,15 +281,15 @@ dataclasses.asdict() + json.dumps()
     ▼
 SongDNA JSON (data/dna/*.json)
     │
-    ├──→ comparison engine
+    ├──→ comparison engine (v1)
     ├──→ validation diagnostics
     ├──→ dataset exploration
     └──→ plot generation
 ```
 
-### Planned pipeline (v2 schema)
+### Target pipeline (v2 schema — Extraction Pipeline v2)
 
-The v2 domain model (SongDNA with StructureDNA and SegmentDNA) has been implemented and tested. Once the extraction pipeline is migrated, the flow will include structural segmentation and per-segment DSP summaries:
+Once the extraction migration is complete (the current priority), the flow will include structural segmentation and per-segment DSP summaries:
 
 ```
 Audio File
@@ -296,18 +298,17 @@ Audio File
 Frame extraction (librosa)
     │
     ▼
-Structural segmentation
+Structural segmentation (segmentation.py)
     │
     ▼
-Per-segment DSP computation
+Per-segment DSP computation (segment_dsp.py)
     │
     ▼
 SongDNA aggregate (v2 — song_dna.py + structure.py)
     │
-    ├──→ segment-level comparison
-    ├──→ structural flow comparison
-    ├──→ search and recommendation
-    └──→ visualization
+    ├──→ segment-level comparison (via comparison/contracts.py)
+    ├──→ Creative Workspace (section highlighting, beat-sync)
+    └──→ Creative Intelligence (compatibility suggestions)
 ```
 
 Downstream consumers never access raw audio directly. Every stage consumes structured data from the SongDNA representation.
@@ -375,7 +376,7 @@ ApplicationContext
 
 ## 9. Adding New Services
 
-### Pattern for Adding a New Service (e.g., DatasetManager)
+### Pattern for Adding a New Service (e.g., WorkspaceOrchestrator)
 
 1. **Define the service class** in `src/analysis/` or a new `src/services/` package.
    - Receive all dependencies via constructor injection.
@@ -397,9 +398,18 @@ ApplicationContext
 
 ---
 
+## 10. Product Vision & Implementation Candidates
+
+For unresolved implementation decisions (UI framework, audio backend, time-stretching) and the broader product philosophy (Four Pillars: Music Understanding, Music Separation, Creative Workspace, Creative Intelligence), refer to the living [VISION.md](VISION.md) document.
+
+The Architecture Decision Records (ADRs) in `docs/adr/` remain the authoritative source for frozen architectural commitments (immutability, aggregate roots, validation). The VISION.md captures exploratory and candidate decisions that have not yet been codified into the codebase.
+
+---
+
 ## Appendix: Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 0.1.1 | 2026-07-22 | Updated domain model to v2; added SegmentDSP, segment identity, schema versioning; removed v1 references; added optimisation target |
-| 0.1.0 | 2026-07-12 | Initial architecture — four-tier layering, config, context, bootstrap |
+| 0.2.0 | 2026-07-26 | Four Pillars product vision adopted (Understanding, Separation, Workspace, Intelligence). VISION.md created. README restructured. Removed outdated "Recommendation Engine" and "Embeddings" roadmap references as frozen commitments. |
+| 0.1.1 | 2026-07-22 | Updated domain model to v2; added SegmentDSP, segment identity, schema versioning; removed v1 references; added optimisation target. |
+| 0.1.0 | 2026-07-12 | Initial architecture — four-tier layering, config, context, bootstrap. |
