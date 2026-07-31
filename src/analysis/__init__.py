@@ -1,10 +1,10 @@
 """
 EchoInsight Infrastructure Layer (analysis).
 
-This package implements all DSP, comparison, validation, and visualisation
+This package implements all DSP, extraction, validation, and visualisation
 logic for the EchoInsight platform.  It is the "engine room" that converts
 raw audio into structured SongDNA fingerprints and provides tools for
-comparing, exploring, and diagnosing those fingerprints.
+exploring and diagnosing those fingerprints.
 
 Layer rules
 -----------
@@ -12,15 +12,21 @@ Layer rules
   ``src.app`` or ``src.config``.
 - All functions receive parameters explicitly — no global state.
 - No ``ApplicationContext`` is accessed directly.
+
+Migration note
+--------------
+The legacy v1 comparison engine (``compare_songs`` etc.) is no longer
+re-exported here.  ``src/analysis/comparison.py`` (v1 song-level engine,
+bound to ``src.core.dna_schema``) is shadowed by the ``comparison/``
+package (v2 comparison contracts, ``src.analysis.comparison.contracts``)
+and its migration is tracked in ``docs/MIGRATION.md`` under the
+"Comparison consumes SongDNA v2" criterion.  Only the extraction API is
+exposed at the package level.
 """
 
-from .comparison import compare_by_files, compare_songs, format_report
 from .extractor import extract_and_save, extract_song_dna
 
 __all__ = [
-    "compare_by_files",
-    "compare_songs",
     "extract_and_save",
     "extract_song_dna",
-    "format_report",
 ]

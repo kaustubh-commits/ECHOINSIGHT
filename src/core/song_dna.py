@@ -34,9 +34,14 @@ Layer rules
 from __future__ import annotations
 
 import dataclasses
+import enum
+import json
+import typing
 from typing import Optional, Tuple
 
-from src.core.identifiers import SongID, URI, generate_song_id
+from src.core.analysis_manifest import AnalysisManifest
+from src.core.frame_reference import FrameReference
+from src.core.identifiers import SongID
 from src.core.structure import StructureDNA
 
 # ---------------------------------------------------------------------------
@@ -233,6 +238,79 @@ class SongSummary:
 
 
 # ---------------------------------------------------------------------------
+# JSON reconstruction helpers
+# ---------------------------------------------------------------------------
+
+
+def _reconstruct_value(tp: object, value: object) -> object:
+    """Recursively reconstruct a value from deserialised JSON data.
+
+    JSON round-trips convert tuples to lists and enums to their string
+    values.  This function walks the type hint of each dataclass field
+    and reconstructs the original Python types.
+    """
+    if value is None:
+        return None
+
+    origin = typing.get_origin(tp)
+
+    if origin is typing.Union:
+        non_none = [a for a in typing.get_args(tp) if a is not type(None)]
+        if len(non_none) == 1:
+            return _reconstruct_value(non_none[0], value)
+        return value
+
+    if origin in (tuple, typing.Tuple):
+        args = typing.get_args(tp)
+        if args and args[-1] is Ellipsis:
+            elem_tp = args[0]
+            return tuple(_reconstruct_value(elem_tp, v) for v in value)
+        if len(args) == len(value) and args:
+            return tuple(_reconstruct_value(a, v) for a, v in zip(args, value))
+        return tuple(value)
+
+    if origin in (list, typing.List):
+        args = typing.get_args(tp)
+        if args:
+            elem_tp = args[0]
+            return [_reconstruct_value(elem_tp, v) for v in value]
+        return list(value)
+
+    if origin in (dict, typing.Dict):
+        args = typing.get_args(tp)
+        if len(args) == 2:
+            _, val_tp = args
+            return {k: _reconstruct_value(val_tp, v) for k, v in value.items()}
+        return dict(value)
+
+    if isinstance(tp, type) and dataclasses.is_dataclass(tp):
+        return _reconstruct_dataclass(tp, value)
+
+    if isinstance(tp, type) and issubclass(tp, enum.Enum):
+        return tp(value)
+
+    return value
+
+
+def _reconstruct_dataclass(cls: type, data: dict) -> object:
+    """Reconstruct a frozen dataclass from a dict using its type hints.
+
+    Fields with ``init=False`` (computed fields such as
+    ``SegmentTiming.duration`` and ``StructureDNA.num_segments``) are
+    recomputed automatically by the constructor and therefore skipped.
+    """
+    hints = typing.get_type_hints(cls)
+    kwargs: dict = {}
+    for field in dataclasses.fields(cls):
+        if not field.init:
+            continue
+        if field.name not in data:
+            continue
+        kwargs[field.name] = _reconstruct_value(hints[field.name], data[field.name])
+    return cls(**kwargs)
+
+
+# ---------------------------------------------------------------------------
 # SongDNA (aggregate root)
 # ---------------------------------------------------------------------------
 
@@ -279,20 +357,11 @@ class SongDNA:
 
     Notes on imports
     ----------------
-    ``FrameReference`` and ``AnalysisManifest`` are imported inside the
-    class body (not at module level) to break a circular dependency:
-    ``FrameReference`` imports ``URI`` from ``identifiers.py``, and
-    ``SongDNA`` needs ``FrameReference`` for its type annotations.
-    Python resolves class-body imports lazily — they execute when the
-    class definition is evaluated, before the module is fully loaded.
-    This is the standard pattern for resolving late-bound annotations
-    in frozen dataclasses without circular imports.
+    ``FrameReference`` and ``AnalysisManifest`` are imported at module
+    level.  There is no circular dependency: ``frame_reference.py``
+    imports only ``identifiers.py``, which imports only the standard
+    library.
     """
-
-    # Lazy imports to avoid circular dependency:
-    #   song_dna.py → frame_reference.py → identifiers.py → song_dna.py
-    from src.core.frame_reference import FrameReference
-    from src.core.analysis_manifest import AnalysisManifest
 
     metadata: SongMetadata
     summary: SongSummary
@@ -320,3 +389,39 @@ class SongDNA:
                     f"Segment at index {i} has song_id {seg.song_id}, "
                     f"expected {sid}"
                 )
+
+    # ------------------------------------------------------------------
+    # JSON serialization
+    # ------------------------------------------------------------------
+
+    def to_json(self) -> str:
+        """Serialize this ``SongDNA`` to a JSON string.
+
+        The output is lossless: :meth:`from_json` reconstructs a
+        ``SongDNA`` that compares equal (``==``) to the original.
+        """
+        return json.dumps(
+            dataclasses.asdict(self),
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "SongDNA":
+        """Deserialize a ``SongDNA`` from JSON produced by :meth:`to_json`.
+
+        Parameters
+        ----------
+        json_str : str
+            JSON string previously produced by :meth:`to_json`.
+
+        Returns
+        -------
+        SongDNA
+            Reconstructed aggregate root.  Comprehensively equal to the
+            original (``==``), including nested structures, enums, and
+            identifiers.
+        """
+        data = json.loads(json_str)
+        return _reconstruct_dataclass(cls, data)

@@ -241,12 +241,29 @@ class SegmentTimbre:
         a given percentage (typically 85%) of spectral energy resides.
     spectral_contrast_mean : Tuple[float, ...]
         Mean spectral contrast per octave band (typically 7 bands).
+    spectral_flux_mean : float
+        Mean spectral flux — a measure of the rate of spectral change.
+        Higher values indicate more dynamic spectral movement.
+        Always >= 0.
+    spectral_flux_std : float
+        Standard deviation of spectral flux — captures how much the
+        spectral change rate varies within the segment.
+        Always >= 0.
+    hpss_envelope_ratio : float
+        Harmonic/percussive source separation (HPSS) envelope ratio —
+        the ratio of percussive energy to total energy in the segment.
+        Always >= 0.  Values near 1.0 indicate a highly percussive
+        segment (strong drums/transients); values near 0.0 indicate a
+        predominantly tonal/harmonic segment.
 
     Invariants
     ----------
     - mfcc_mean has 13 elements when present
     - mfcc_std has 13 elements when present
     - spectral_contrast_mean has 7 elements when present
+    - spectral_flux_mean >= 0
+    - spectral_flux_std >= 0
+    - hpss_envelope_ratio >= 0
     """
 
     rms_mean: float = 0.0
@@ -259,6 +276,9 @@ class SegmentTimbre:
     zero_crossing_rate_mean: float = 0.0
     spectral_rolloff_mean: float = 0.0
     spectral_contrast_mean: Tuple[float, ...] = ()
+    spectral_flux_mean: float = 0.0
+    spectral_flux_std: float = 0.0
+    hpss_envelope_ratio: float = 0.0
 
     def __post_init__(self) -> None:
         if self.rms_mean < 0:
@@ -308,6 +328,21 @@ class SegmentTimbre:
             raise ValueError(
                 f"spectral_contrast_mean must have 7 elements, "
                 f"got {len(self.spectral_contrast_mean)}"
+            )
+        if self.spectral_flux_mean < 0:
+            raise ValueError(
+                f"spectral_flux_mean must be >= 0, "
+                f"got {self.spectral_flux_mean}"
+            )
+        if self.spectral_flux_std < 0:
+            raise ValueError(
+                f"spectral_flux_std must be >= 0, "
+                f"got {self.spectral_flux_std}"
+            )
+        if self.hpss_envelope_ratio < 0:
+            raise ValueError(
+                f"hpss_envelope_ratio must be >= 0, "
+                f"got {self.hpss_envelope_ratio}"
             )
 
 

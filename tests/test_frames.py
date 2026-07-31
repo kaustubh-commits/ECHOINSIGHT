@@ -474,11 +474,13 @@ def test_extract_and_save(tmp_path: Path) -> None:
     audio_path = str(mp3_files[0])
     dna = extract_and_save(audio_path, data_root=tmp_path)
 
-    # Verify SongDNA structure
+    # Verify SongDNA v2 structure
     assert dna.frames is not None
     assert dna.manifest is not None
-    assert dna.rhythm.beat_count > 0
-    assert len(dna.rhythm.beat_frames) == dna.rhythm.beat_count
+    assert dna.summary.tempo_estimate > 0
+    assert dna.structure.num_segments >= 1
+    assert dna.metadata.duration > 0
+    assert dna.metadata.sample_rate == 22050
 
     # Verify NPZ file exists
     stem = Path(audio_path).stem
@@ -492,7 +494,7 @@ def test_extract_and_save(tmp_path: Path) -> None:
     # Verify manifest fields
     assert dna.manifest.schema_version == "1.0.0"
     assert dna.manifest.extractor_version == "2.0.0"
-    assert dna.manifest.feature_set_version == "v1"
+    assert dna.manifest.feature_set_version == "v2"
     assert len(dna.manifest.config_hash) == 64
 
 
@@ -552,5 +554,5 @@ def test_old_extract_api_backward_compatible() -> None:
     dna = extract_song_dna(str(mp3_files[0]))
     assert dna.frames is None
     assert dna.manifest is None
-    assert dna.rhythm.tempo > 0
-    assert dna.rhythm.beat_count > 0
+    assert dna.summary.tempo_estimate > 0
+    assert dna.structure.num_segments >= 1

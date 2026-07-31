@@ -125,9 +125,10 @@ def test_extraction_pipeline_produces_song_dna() -> None:
     dna = extract_song_dna(str(mp3_files[0]))
 
     assert dna.metadata.duration > 0
-    assert dna.rhythm.tempo > 0
-    assert len(dna.timbre.mfcc_mean) == 13
-    assert len(dna.tonal.chroma_mean) == 12
+    assert dna.summary.tempo_estimate > 0
+    assert len(dna.summary.mfcc_mean) == 13
+    assert len(dna.summary.chroma_mean) == 12
+    assert dna.structure.num_segments >= 1
 
 
 def test_bootstrap_does_not_break_cli_extraction() -> None:
@@ -149,12 +150,10 @@ def test_bootstrap_does_not_break_cli_extraction() -> None:
 
     output = json.dumps(dataclasses.asdict(dna), indent=2)
     assert '"metadata"' in output
-    assert '"rhythm"' in output
-    assert '"timbre"' in output
-    assert '"tonal"' in output
+    assert '"summary"' in output
     assert '"structure"' in output
-    assert '"intelligence"' in output
-    assert '"stem"' in output
+    assert '"segments"' in output
+    assert '"schema_version"' in output
 
 
 # ======================================================================

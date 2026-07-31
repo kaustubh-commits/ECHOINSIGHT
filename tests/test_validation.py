@@ -9,14 +9,11 @@ that ``test_serialization.py`` does not cover.
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 import pytest
 
 from src.core.identifiers import (
     SongID,
-    URI,
-    Estimate,
     SegmentIndex,
 )
 from src.core.enums import LabelType, RepetitionRole
@@ -168,6 +165,35 @@ class TestSegmentTimbreValidation:
     def test_rejects_spectral_contrast_wrong_length(self) -> None:
         with pytest.raises(ValueError, match="spectral_contrast_mean"):
             SegmentTimbre(spectral_contrast_mean=(0.1, 0.2))  # 2 != 7
+
+
+# ===================================================================
+# SegmentTimbre dynamics (v2 additions) validation
+# ===================================================================
+
+
+class TestSegmentTimbreDynamicsValidation:
+    def test_rejects_negative_spectral_flux_mean(self) -> None:
+        with pytest.raises(ValueError, match="spectral_flux_mean"):
+            SegmentTimbre(spectral_flux_mean=-0.1)
+
+    def test_rejects_negative_spectral_flux_std(self) -> None:
+        with pytest.raises(ValueError, match="spectral_flux_std"):
+            SegmentTimbre(spectral_flux_std=-0.1)
+
+    def test_rejects_negative_hpss_envelope_ratio(self) -> None:
+        with pytest.raises(ValueError, match="hpss_envelope_ratio"):
+            SegmentTimbre(hpss_envelope_ratio=-0.01)
+
+    def test_accepts_valid_dynamics_values(self) -> None:
+        timbre = SegmentTimbre(
+            spectral_flux_mean=0.2,
+            spectral_flux_std=0.05,
+            hpss_envelope_ratio=0.4,
+        )
+        assert timbre.spectral_flux_mean == 0.2
+        assert timbre.spectral_flux_std == 0.05
+        assert timbre.hpss_envelope_ratio == 0.4
 
 
 # ===================================================================

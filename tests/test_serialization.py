@@ -15,7 +15,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import uuid
-from typing import Any, Dict
 
 from src.core.identifiers import (
     SongID,
@@ -90,6 +89,9 @@ def _make_timbre() -> SegmentTimbre:
         zero_crossing_rate_mean=0.1,
         spectral_rolloff_mean=4000.0,
         spectral_contrast_mean=tuple(float(i) for i in range(7)),
+        spectral_flux_mean=0.2,
+        spectral_flux_std=0.05,
+        hpss_envelope_ratio=0.4,
     )
 
 
@@ -243,6 +245,9 @@ def test_segment_dna_round_trip() -> None:
     assert restored["dsp"]["rhythm"]["tempo"] == 120.0
     assert restored["dsp"]["harmony"]["key"] == "C major"
     assert restored["dsp"]["timbre"]["rms_mean"] == 0.5
+    assert restored["dsp"]["timbre"]["spectral_flux_mean"] == 0.2
+    assert restored["dsp"]["timbre"]["spectral_flux_std"] == 0.05
+    assert restored["dsp"]["timbre"]["hpss_envelope_ratio"] == 0.4
     assert restored["context"]["index"] == 0
     assert restored["context"]["label"] == "verse"
 
