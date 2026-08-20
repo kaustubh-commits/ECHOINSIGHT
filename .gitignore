@@ -9,6 +9,7 @@ build/
 # Virtual environments
 venv/
 .venv/
+echo_env/
 
 # Testing, linting, type checking
 .pytest_cache/
