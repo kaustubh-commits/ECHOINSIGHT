@@ -1,0 +1,268 @@
+{
+  "experiment": "E003",
+  "model": "pretrained_htdemucs",
+  "tracks_evaluated": 10,
+  "avg_inference_time_sec": 9.84,
+  "results": [
+    {
+      "track": "AM Contra - Heart Peripheral",
+      "inference_time_sec": 8.48,
+      "stems": {
+        "drums": {
+          "sdr_median": 7.78,
+          "sir_median": 14.33,
+          "sar_median": 14.73
+        },
+        "bass": {
+          "sdr_median": -7.87,
+          "sir_median": 7.93,
+          "sar_median": -5.55
+        },
+        "other": {
+          "sdr_median": 0.46,
+          "sir_median": 0.92,
+          "sar_median": 4.5
+        },
+        "vocals": {
+          "sdr_median": 10.37,
+          "sir_median": 18.83,
+          "sar_median": 18.25
+        }
+      }
+    },
+    {
+      "track": "Al James - Schoolboy Facination",
+      "inference_time_sec": 8.31,
+      "stems": {
+        "drums": {
+          "sdr_median": 6.93,
+          "sir_median": 12.85,
+          "sar_median": 9.34
+        },
+        "bass": {
+          "sdr_median": 12.18,
+          "sir_median": 11.65,
+          "sar_median": 19.25
+        },
+        "other": {
+          "sdr_median": 4.94,
+          "sir_median": 9.88,
+          "sar_median": 5.88
+        },
+        "vocals": {
+          "sdr_median": 9.01,
+          "sir_median": 13.7,
+          "sar_median": 13.4
+        }
+      }
+    },
+    {
+      "track": "Angels In Amplifiers - I'm Alright",
+      "inference_time_sec": 7.46,
+      "stems": {
+        "drums": {
+          "sdr_median": 7.4,
+          "sir_median": 10.1,
+          "sar_median": 16.3
+        },
+        "bass": {
+          "sdr_median": 10.89,
+          "sir_median": 5.16,
+          "sar_median": 19.37
+        },
+        "other": {
+          "sdr_median": 8.15,
+          "sir_median": 16.37,
+          "sar_median": 7.81
+        },
+        "vocals": {
+          "sdr_median": 9.58,
+          "sir_median": 18.3,
+          "sar_median": 12.72
+        }
+      }
+    },
+    {
+      "track": "Arise - Run Run Run",
+      "inference_time_sec": 9.13,
+      "stems": {
+        "drums": {
+          "sdr_median": -2.74,
+          "sir_median": 26.2,
+          "sar_median": -12.01
+        },
+        "bass": {
+          "sdr_median": 12.16,
+          "sir_median": -6.12,
+          "sar_median": 7.71
+        },
+        "other": {
+          "sdr_median": 0.91,
+          "sir_median": 1.14,
+          "sar_median": -17.64
+        },
+        "vocals": {
+          "sdr_median": 10.32,
+          "sir_median": 19.26,
+          "sar_median": 2.72
+        }
+      }
+    },
+    {
+      "track": "BKS - Bulldozer",
+      "inference_time_sec": 13.96,
+      "stems": {
+        "drums": {
+          "sdr_median": 12.58,
+          "sir_median": 19.77,
+          "sar_median": 1.35
+        },
+        "bass": {
+          "sdr_median": 9.84,
+          "sir_median": -14.94,
+          "sar_median": 29.34
+        },
+        "other": {
+          "sdr_median": 6.66,
+          "sir_median": 12.28,
+          "sar_median": -12.28
+        },
+        "vocals": {
+          "sdr_median": 4.95,
+          "sir_median": 12.24,
+          "sar_median": -2.45
+        }
+      }
+    },
+    {
+      "track": "BKS - Too Much",
+      "inference_time_sec": 9.55,
+      "stems": {
+        "drums": {
+          "sdr_median": 10.0,
+          "sir_median": 18.52,
+          "sar_median": -4.06
+        },
+        "bass": {
+          "sdr_median": 14.45,
+          "sir_median": 4.79,
+          "sar_median": 9.23
+        },
+        "other": {
+          "sdr_median": 6.13,
+          "sir_median": 11.35,
+          "sar_median": -3.01
+        },
+        "vocals": {
+          "sdr_median": 11.9,
+          "sir_median": 21.93,
+          "sar_median": 8.31
+        }
+      }
+    },
+    {
+      "track": "Ben Carrigan - We'll Talk About It All Tonight",
+      "inference_time_sec": 10.54,
+      "stems": {
+        "drums": {
+          "sdr_median": 10.06,
+          "sir_median": 17.44,
+          "sar_median": 21.19
+        },
+        "bass": {
+          "sdr_median": 13.28,
+          "sir_median": 21.88,
+          "sar_median": 27.02
+        },
+        "other": {
+          "sdr_median": 5.97,
+          "sir_median": 15.24,
+          "sar_median": 10.25
+        },
+        "vocals": {
+          "sdr_median": 4.77,
+          "sir_median": 10.2,
+          "sar_median": 15.05
+        }
+      }
+    },
+    {
+      "track": "Bobby Nobody - Stitch Up",
+      "inference_time_sec": 9.12,
+      "stems": {
+        "drums": {
+          "sdr_median": 7.46,
+          "sir_median": 12.48,
+          "sar_median": 18.95
+        },
+        "bass": {
+          "sdr_median": 11.2,
+          "sir_median": 16.59,
+          "sar_median": 15.09
+        },
+        "other": {
+          "sdr_median": 5.7,
+          "sir_median": 11.6,
+          "sar_median": 11.32
+        },
+        "vocals": {
+          "sdr_median": 9.87,
+          "sir_median": 19.08,
+          "sar_median": 20.12
+        }
+      }
+    },
+    {
+      "track": "Buitraker - Revo X",
+      "inference_time_sec": 11.54,
+      "stems": {
+        "drums": {
+          "sdr_median": 14.28,
+          "sir_median": 20.9,
+          "sar_median": 13.93
+        },
+        "bass": {
+          "sdr_median": 11.68,
+          "sir_median": 6.67,
+          "sar_median": 15.68
+        },
+        "other": {
+          "sdr_median": 6.81,
+          "sir_median": 11.39,
+          "sar_median": 2.28
+        },
+        "vocals": {
+          "sdr_median": 5.99,
+          "sir_median": 11.3,
+          "sar_median": 2.1
+        }
+      }
+    },
+    {
+      "track": "Carlos Gonzalez - A Place For Us",
+      "inference_time_sec": 10.31,
+      "stems": {
+        "drums": {
+          "sdr_median": 6.52,
+          "sir_median": 14.11,
+          "sar_median": 15.21
+        },
+        "bass": {
+          "sdr_median": -0.0,
+          "sir_median": 5.78,
+          "sar_median": 15.14
+        },
+        "other": {
+          "sdr_median": 7.77,
+          "sir_median": 15.02,
+          "sar_median": 12.43
+        },
+        "vocals": {
+          "sdr_median": 7.41,
+          "sir_median": 14.29,
+          "sar_median": 15.62
+        }
+      }
+    }
+  ]
+}
