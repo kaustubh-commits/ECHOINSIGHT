@@ -1,111 +1,163 @@
-"""
-Audio stem separation engine wrapping HTDemucs for EchoInsight.
-"""
+"""Audio stem separation engine for EchoInsight."""
 
 from __future__ import annotations
 
-import logging
+import os
 from pathlib import Path
+from typing import Optional
+
+import soundfile as sf
 
 from src.core.stems import SeparatedTrack, StemPaths
 
-logger = logging.getLogger("echoinsight.separator")
-
 
 class EchoSeparator:
-    """Encapsulates stem separation inference with lazy loading and disk caching."""
+    """Handles 4-stem audio separation using HTDemucs architectures.
+
+    Supports both stock pretrained weights and custom fine-tuned checkpoints
+    with automated disk-level caching and lazy PyTorch imports.
+    """
 
     def __init__(
         self,
         model_name: str = "htdemucs",
-        device: str | None = None,
-        shifts: int = 1,
-        overlap: float = 0.25,
+        model_path: Optional[str | Path] = None,
+        device: Optional[str] = None,
+        cache_dir: Optional[str | Path] = None,
     ) -> None:
         self.model_name = model_name
-        self.device = device
-        self.shifts = shifts
-        self.overlap = overlap
+        self.model_path = Path(model_path) if model_path else None
+        self.device_name = device
+        self.cache_dir = Path(cache_dir) if cache_dir else Path(".cache/stems")
         self._model = None
+        self._device = None
 
-    def _load_model(self) -> None:
-        """Lazy-loads PyTorch and Demucs only when separation is invoked."""
-        if self._model is None:
+    @property
+    def is_custom_checkpoint(self) -> bool:
+        """Indicates whether a custom fine-tuned checkpoint is configured."""
+        return self.model_path is not None and self.model_path.is_file()
+
+    def _load_model(self):
+        """Lazy load PyTorch, Demucs architecture, and custom weights."""
+        if self._model is not None:
+            return self._model, self._device
+
+        try:
             import torch
             from demucs.pretrained import get_model
+        except ImportError as err:
+            raise ImportError(
+                "PyTorch and Demucs are required for audio separation. "
+                "Install them via 'pip install torch torchaudio demucs'."
+            ) from err
 
-            if self.device is None:
-                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if self.device_name:
+            self._device = torch.device(self.device_name)
+        else:
+            self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-            logger.info("Loading separation model: %s on %s", self.model_name, self.device)
-            self._model = get_model(self.model_name)
-            self._model.to(self.device)
-            self._model.eval()
+        base_bag = get_model(self.model_name)
+
+        if self.is_custom_checkpoint:
+            model = base_bag.models[0].to(self._device)
+            state_dict = torch.load(str(self.model_path), map_location=self._device)
+            model.load_state_dict(state_dict)
+            model.eval()
+            self._model = model
+        else:
+            base_bag.to(self._device)
+            base_bag.eval()
+            self._model = base_bag
+
+        return self._model, self._device
 
     def separate(
         self,
         audio_path: str | Path,
-        output_dir: str | Path,
-        track_id: str,
+        output_dir: Optional[str | Path] = None,
+        force_recompute: bool = False,
     ) -> SeparatedTrack:
-        """Separate an audio file into 4 stems and save them to output_dir."""
-        import torch
-        import torchaudio
-        from demucs.apply import apply_model
+        """Separates an audio file into Drums, Bass, Other, and Vocals.
 
-        audio_path = Path(audio_path).resolve()
-        output_dir = Path(output_dir).resolve() / track_id
-        output_dir.mkdir(parents=True, exist_ok=True)
+        Args:
+            audio_path: Path to the input audio file (.wav, .mp3, etc.).
+            output_dir: Target directory for exported stems. Defaults to cache_dir.
+            force_recompute: If True, bypasses disk cache and re-runs inference.
+
+        Returns:
+            SeparatedTrack containing validated StemPaths.
+        """
+        input_file = Path(audio_path)
+        if not input_file.is_file():
+            raise FileNotFoundError(f"Input audio file not found: {input_file}")
+
+        # Read basic metadata using soundfile without loading raw tensors
+        try:
+            info = sf.info(str(input_file))
+            sample_rate = info.samplerate
+            duration_seconds = float(info.duration)
+        except Exception:
+            sample_rate = 44100
+            duration_seconds = 0.0
+
+        track_id = input_file.stem
+        target_dir = Path(output_dir) if output_dir else self.cache_dir / track_id
+        target_dir.mkdir(parents=True, exist_ok=True)
 
         expected_stems = {
-            "vocals": output_dir / "vocals.wav",
-            "drums": output_dir / "drums.wav",
-            "bass": output_dir / "bass.wav",
-            "other": output_dir / "other.wav",
+            "vocals": target_dir / "vocals.wav",
+            "drums": target_dir / "drums.wav",
+            "bass": target_dir / "bass.wav",
+            "other": target_dir / "other.wav",
         }
 
-        # Check if already cached on disk
-        if all(p.exists() for p in expected_stems.values()):
-            logger.info("Using cached stems for track %s at %s", track_id, output_dir)
-            mix_info = torchaudio.info(str(audio_path))
+        model_tag = f"{self.model_name}_custom" if self.is_custom_checkpoint else self.model_name
+
+        # Check disk cache
+        if not force_recompute and all(p.is_file() for p in expected_stems.values()):
+            stem_paths = StemPaths(**expected_stems)
             return SeparatedTrack(
                 track_id=track_id,
-                original_audio=audio_path,
-                sample_rate=mix_info.sample_rate,
-                duration_seconds=mix_info.num_frames / mix_info.sample_rate,
-                stems=StemPaths(**expected_stems),
-                model_name=self.model_name,
+                original_audio=input_file,
+                sample_rate=sample_rate,
+                duration_seconds=duration_seconds,
+                stems=stem_paths,
+                model_name=model_tag,
             )
 
-        self._load_model()
+        # Lazy load model and dependencies
+        model, device = self._load_model()
+        import torch
+        from demucs.apply import apply_model
 
-        mix, sr = torchaudio.load(str(audio_path))
-        if sr != self._model.samplerate:
-            mix = torchaudio.functional.resample(mix, sr, self._model.samplerate)
-            sr = self._model.samplerate
+        # Load and prepare audio
+        data, sr = sf.read(str(input_file), dtype="float32", always_2d=True)
+        audio_tensor = torch.from_numpy(data.T).unsqueeze(0).to(device)
 
-        mix_tensor = mix.unsqueeze(0).to(self.device)
-
-        logger.info("Running stem separation inference for %s...", track_id)
+        # Execute separation
         with torch.no_grad():
             estimates = apply_model(
-                self._model,
-                mix_tensor,
-                shifts=self.shifts,
+                model,
+                audio_tensor,
+                shifts=1,
                 split=True,
-                overlap=self.overlap,
+                overlap=0.25,
             )
 
-        estimates = estimates.squeeze(0).cpu()
-        for idx, source in enumerate(self._model.sources):
-            stem_path = expected_stems[source]
-            torchaudio.save(str(stem_path), estimates[idx], sr)
+        # Export individual stems
+        estimates_np = estimates.squeeze(0).cpu().numpy()  # (4, channels, samples)
+        source_names = ["drums", "bass", "other", "vocals"]
 
+        for idx, src_name in enumerate(source_names):
+            stem_audio = estimates_np[idx].T  # (samples, channels)
+            sf.write(str(expected_stems[src_name]), stem_audio, sr)
+
+        stem_paths = StemPaths(**expected_stems)
         return SeparatedTrack(
             track_id=track_id,
-            original_audio=audio_path,
+            original_audio=input_file,
             sample_rate=sr,
-            duration_seconds=mix.shape[1] / sr,
-            stems=StemPaths(**expected_stems),
-            model_name=self.model_name,
+            duration_seconds=float(len(data) / sr),
+            stems=stem_paths,
+            model_name=model_tag,
         )

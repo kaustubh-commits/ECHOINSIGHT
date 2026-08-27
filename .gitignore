@@ -53,3 +53,19 @@ data/plots/
 
 # VS Code workspace storage (handled by .vscode/ above, but explicit for safety)
 .vscode/settings.json
+
+# Machine Learning model weights and checkpoints
+*.th
+*.pt
+*.pth
+*.onnx
+
+# Additional audio formats
+*.mp3
+*.m4a
+*.ogg
+*.aac
+
+# Default local cache directory
+.cache/
+data/stems/
