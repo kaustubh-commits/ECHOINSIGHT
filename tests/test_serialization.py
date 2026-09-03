@@ -294,7 +294,7 @@ def test_song_dna_round_trip() -> None:
     restored = json.loads(as_json)
 
     # Top-level
-    assert restored["schema_version"] == "2.0.0"
+    assert restored["schema_version"] == "2.1.0"
     assert restored["metadata"]["song_id"] == song_id
     assert restored["metadata"]["duration"] == 120.0
     assert restored["summary"]["tempo_estimate"] == 120.0

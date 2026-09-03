@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 from src.analysis.extractor import extract_full_pipeline
 from src.analysis.package_store import PackageStore
 from src.analysis.spotify_enricher import SpotifyEnricher
-from src.core.package import EnrichedSongPackage, SongPackage
+from src.core.package import EnrichedSongPackage
 from src.ui.widgets.stem_mixer import StemMixer
 from src.ui.widgets.timeline_view import TimelineView
 
@@ -325,12 +325,7 @@ class DeckView(QGroupBox):
                 pkg = PackageStore.load(selected)
                 self.load_package(pkg)
             else:
-                extracted = extract_full_pipeline(file_path=selected, separate_stems=False)
-                base_pkg = SongPackage(
-                    song_dna=extracted.song_dna,
-                    separated_track=extracted.separated_track,
-                    stem_analysis=extracted.stem_analysis,
-                )
+                base_pkg = extract_full_pipeline(file_path=selected, separate_stems=False)
                 enricher = SpotifyEnricher()
                 enriched = enricher.enrich(base_pkg)
                 self.load_package(enriched, audio_path=selected)

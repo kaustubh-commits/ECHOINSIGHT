@@ -112,26 +112,55 @@ class TimelineView(QWidget):
         painter.setPen(QPen(QColor("#2D3748"), 1))
         painter.drawLine(0, int(grid_y), int(w), int(grid_y))
 
-        # Render beat & bar divisions based on tempo
-        tempo = self._package.song_dna.summary.tempo_estimate
-        if tempo > 0:
-            spb = 60.0 / tempo  # seconds per beat
-            total_beats = int(self._duration / spb)
-            
-            painter.setFont(QFont("Segoe UI", 7))
-            for b in range(0, total_beats + 1):
-                beat_sec = b * spb
-                x = (beat_sec / self._duration) * w
-                is_bar = (b % 4 == 0)
+        # Render beat & bar divisions from the real Timeline when available;
+        # fall back to a synthetic tempo-derived 4/4 grid only when no
+        # Timeline exists (e.g. legacy packages extracted pre-timeline).
+        timeline = self._package.song_dna.timeline
+        if timeline is not None and timeline.bars:
+            bar_start_times = {round(bar.start_time, 3) for bar in timeline.bars}
 
-                if is_bar:
-                    bar_num = (b // 4) + 1
-                    painter.setPen(QPen(QColor("#A0AEC0"), 1))
-                    painter.drawLine(int(x), int(grid_y), int(x), int(h))
-                    painter.drawText(QRectF(x + 2, grid_y + 2, 30, 16), Qt.AlignmentFlag.AlignLeft, f"|{bar_num}")
-                else:
-                    painter.setPen(QPen(QColor("#4A5568"), 1))
-                    painter.drawLine(int(x), int(grid_y + 12), int(x), int(h))
+            painter.setFont(QFont("Segoe UI", 7))
+
+            # Bars: full-height separators; label only bar 1 and every 8th bar.
+            for bar in timeline.bars:
+                x = (bar.start_time / self._duration) * w
+                painter.setPen(QPen(QColor("#A0AEC0"), 1))
+                painter.drawLine(int(x), int(grid_y), int(x), int(h))
+                if bar.number == 1 or bar.number % 8 == 0:
+                    painter.drawText(
+                        QRectF(x + 2, grid_y + 2, 30, 16),
+                        Qt.AlignmentFlag.AlignLeft,
+                        f"|{bar.number}",
+                    )
+
+            # Beats: short ticks in the lower strip, skipping bar starts so
+            # beat ticks never overwrite the bar separators above.
+            painter.setPen(QPen(QColor("#4A5568"), 1))
+            for beat in timeline.beats:
+                if round(beat, 3) in bar_start_times:
+                    continue
+                x = (beat / self._duration) * w
+                painter.drawLine(int(x), int(grid_y + 12), int(x), int(h))
+        else:
+            tempo = self._package.song_dna.summary.tempo_estimate
+            if tempo > 0:
+                spb = 60.0 / tempo  # seconds per beat
+                total_beats = int(self._duration / spb)
+
+                painter.setFont(QFont("Segoe UI", 7))
+                for b in range(0, total_beats + 1):
+                    beat_sec = b * spb
+                    x = (beat_sec / self._duration) * w
+                    is_bar = (b % 4 == 0)
+
+                    if is_bar:
+                        bar_num = (b // 4) + 1
+                        painter.setPen(QPen(QColor("#A0AEC0"), 1))
+                        painter.drawLine(int(x), int(grid_y), int(x), int(h))
+                        painter.drawText(QRectF(x + 2, grid_y + 2, 30, 16), Qt.AlignmentFlag.AlignLeft, f"|{bar_num}")
+                    else:
+                        painter.setPen(QPen(QColor("#4A5568"), 1))
+                        painter.drawLine(int(x), int(grid_y + 12), int(x), int(h))
 
         # 5. Playhead
         playhead_x = (self._playhead_sec / self._duration) * w

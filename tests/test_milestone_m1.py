@@ -11,7 +11,6 @@ import soundfile as sf
 
 from src.analysis.extractor import extract_full_pipeline
 from src.analysis.package_store import PackageStore
-from src.core.package import SongPackage
 
 
 @pytest.fixture
@@ -54,11 +53,7 @@ def test_milestone_m1_complete_vertical_slice(mock_tracks, tmp_path):
         data_root=tmp_path,
         separate_stems=True,
     )
-    song_pkg_a = SongPackage(
-        song_dna=pkg_a_raw.song_dna,
-        separated_track=pkg_a_raw.separated_track,
-        stem_analysis=pkg_a_raw.stem_analysis,
-    )
+    song_pkg_a = pkg_a_raw
 
     # 2. Persist SongPackage A
     pkg_a_json = tmp_path / "dna" / "beyond_package.json"
@@ -82,11 +77,7 @@ def test_milestone_m1_complete_vertical_slice(mock_tracks, tmp_path):
         data_root=tmp_path,
         separate_stems=True,
     )
-    song_pkg_b = SongPackage(
-        song_dna=pkg_b_raw.song_dna,
-        separated_track=pkg_b_raw.separated_track,
-        stem_analysis=pkg_b_raw.stem_analysis,
-    )
+    song_pkg_b = pkg_b_raw
     pkg_b_json = tmp_path / "dna" / "contact_package.json"
     PackageStore.save(song_pkg_b, pkg_b_json)
     loaded_pkg_b = PackageStore.load(pkg_b_json)

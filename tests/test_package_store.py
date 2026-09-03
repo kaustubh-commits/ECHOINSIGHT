@@ -1,5 +1,6 @@
 """Unit tests for SongPackage serialization and persistence."""
 
+import dataclasses
 from pathlib import Path
 import pytest
 
@@ -20,6 +21,7 @@ from src.core.structure import (
     SegmentTiming,
     StructureDNA,
 )
+from src.core.timeline import Timeline
 
 
 @pytest.fixture
@@ -124,3 +126,33 @@ def test_song_package_roundtrip(dummy_song_package, tmp_path):
     assert loaded_package.separated_track.model_name == "htdemucs_custom"
     assert loaded_package.stem_analysis.vocal_energy_ratio == 0.35
     assert loaded_package.stem_analysis.beat_frames == [0, 43, 86]
+
+
+def test_song_package_preserves_timeline_roundtrip(dummy_song_package, tmp_path):
+    """SongDNA.with(Timeline) -> SongPackage -> PackageStore -> Timeline intact."""
+    # 120 BPM grid over a 120 s track: beats every 0.5 s, bars every 4 beats.
+    duration = 120.0
+    beats = tuple(round(i * 0.5, 6) for i in range(240))  # 0.0 .. 119.5
+    timeline = Timeline.build(beats=beats, duration=duration)
+
+    dna_with_timeline = dataclasses.replace(dummy_song_package.song_dna, timeline=timeline)
+    package_with_timeline = dataclasses.replace(
+        dummy_song_package,
+        song_dna=dna_with_timeline,
+        separated_track=None,
+        stem_analysis=None,
+    )
+
+    json_path = tmp_path / "package_with_timeline.json"
+    PackageStore.save(package_with_timeline, json_path)
+    loaded = PackageStore.load(json_path)
+
+    loaded_tl = loaded.song_dna.timeline
+    assert loaded_tl is not None, "Timeline must survive PackageStore round-trip"
+    assert tuple(loaded_tl.beats) == tuple(timeline.beats)
+    assert tuple(loaded_tl.downbeats) == tuple(timeline.downbeats)
+    assert loaded_tl.num_bars == timeline.num_bars == len(timeline.bars) == 60
+    assert loaded_tl.bars[0].number == 1
+    assert abs(loaded_tl.bars[0].start_time - 0.0) < 1e-6
+    assert abs(loaded_tl.bars[-1].end_time - duration) < 1e-6
+    assert abs(loaded_tl.bars[-1].end_time - loaded.song_dna.metadata.duration) < 1e-3

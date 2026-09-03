@@ -43,6 +43,7 @@ from src.core.analysis_manifest import AnalysisManifest
 from src.core.frame_reference import FrameReference
 from src.core.identifiers import SongID
 from src.core.structure import StructureDNA
+from src.core.timeline import Timeline
 
 # ---------------------------------------------------------------------------
 # SongMetadata
@@ -346,6 +347,9 @@ class SongDNA:
         Macro-structural organisation.  Loaded eagerly because every
         downstream consumer needs structural information.  **Composition,
         not reference** — the structure lives inside the aggregate.
+    timeline : Optional[Timeline]
+        Beat-aligned timeline (beats, downbeats, bars) in seconds.
+        ``None`` when only summary statistics are available.
     frames : Optional[FrameReference]
         Reference to binary frame-level data (NPZ).  ``None`` when only
         summary statistics are available (lightweight extraction).
@@ -366,9 +370,10 @@ class SongDNA:
     metadata: SongMetadata
     summary: SongSummary
     structure: StructureDNA
+    timeline: Optional[Timeline] = None
     frames: Optional[FrameReference] = None
     manifest: Optional[AnalysisManifest] = None
-    schema_version: str = "2.0.0"
+    schema_version: str = "2.1.0"
 
     def __post_init__(self) -> None:
         # Validate that the structure's total_duration matches the
@@ -388,6 +393,19 @@ class SongDNA:
                 raise ValueError(
                     f"Segment at index {i} has song_id {seg.song_id}, "
                     f"expected {sid}"
+                )
+
+        # Validate timeline coverage when a timeline is present: the last
+        # bar must extend to the track duration (the tail bar is built to
+        # cover the full track in Timeline.build).
+        if self.timeline is not None:
+            if abs(
+                self.timeline.bars[-1].end_time - self.metadata.duration
+            ) > 1e-3:
+                raise ValueError(
+                    f"timeline.bars[-1].end_time "
+                    f"({self.timeline.bars[-1].end_time}) does not match "
+                    f"metadata.duration ({self.metadata.duration})"
                 )
 
     # ------------------------------------------------------------------

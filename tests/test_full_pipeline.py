@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from src.analysis.extractor import extract_full_pipeline, ExtractedSongPackage
+from src.analysis.extractor import extract_full_pipeline
+from src.core.package import SongPackage
 from src.core.song_dna import SongDNA
 from src.core.stems import SeparatedTrack
 
@@ -30,7 +31,7 @@ def test_extract_full_pipeline_pillar1_only(synthetic_audio_file, tmp_path):
         data_root=tmp_path,
         separate_stems=False,
     )
-    assert isinstance(pkg, ExtractedSongPackage)
+    assert isinstance(pkg, SongPackage)
     assert isinstance(pkg.song_dna, SongDNA)
     assert pkg.song_dna.summary.tempo_estimate > 0
     assert pkg.separated_track is None
@@ -54,7 +55,7 @@ def test_extract_full_pipeline_with_cached_stems(synthetic_audio_file, tmp_path)
         separate_stems=True,
     )
 
-    assert isinstance(pkg, ExtractedSongPackage)
+    assert isinstance(pkg, SongPackage)
     assert isinstance(pkg.song_dna, SongDNA)
     assert isinstance(pkg.separated_track, SeparatedTrack)
     assert pkg.stem_analysis is not None

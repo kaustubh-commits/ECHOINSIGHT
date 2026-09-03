@@ -64,7 +64,7 @@ N_MFCC: int = 13
 MIN_SEGMENT_DURATION: float = 4.0
 """Minimum segment duration in seconds.  Shorter segments are merged."""
 
-N_SEGMENTS_AGGLO: int = 8
+N_SEGMENTS_AGGLO: int = 16
 """Target number of segments for the agglomerative clustering step.
 
 This is deliberately a "stretch" target — the actual number of returned
@@ -121,7 +121,10 @@ def detect_segments(y: np.ndarray, sr: int) -> List[Tuple[float, float]]:
     cluster_frames = _cluster_boundaries(mfcc, n_segments=N_SEGMENTS_AGGLO)
 
     # --- Merge candidates ------------------------------------------------
-    boundary_frames = sorted(set(int(f) for f in peak_frames) | set(cluster_frames))
+    peak_set = set(int(f) for f in peak_frames)
+    cluster_set = set(cluster_frames)
+    boundary_frames = sorted(peak_set | cluster_set)
+
     boundary_frames = _enforce_min_segment(boundary_frames, frames, duration)
 
     if not boundary_frames:
