@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=9.0.0
+matplotlib>=3.8.0
+tomlkit>=0.15.0
+platformdirs>=4.0.0
