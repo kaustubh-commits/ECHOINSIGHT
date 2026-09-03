@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QToolTip, QWidget
 
 from src.core.package import EnrichedSongPackage
 from src.ui.theme import SEGMENT_COLORS
@@ -26,12 +26,16 @@ class TimelineView(QWidget):
         self._playhead_sec: float = 0.0
         self._waveform_peaks: np.ndarray | None = None
         self.setMouseTracking(True)
+        self._selected_segment: int | None = None
+        self._hover_segment: int | None = None
 
     def set_package(self, package: EnrichedSongPackage, audio_samples: np.ndarray | None = None) -> None:
         """Configures timeline and computes peak envelope."""
         self._package = package
         self._duration = package.song_dna.metadata.duration
         self._playhead_sec = 0.0
+        self._selected_segment = None
+        self._hover_segment = None
 
         if audio_samples is not None and len(audio_samples) > 0:
             n_bins = 600
@@ -46,16 +50,70 @@ class TimelineView(QWidget):
 
         self.update()
 
+    def _segment_at(self, time_seconds: float) -> int | None:
+        """Index of the segment whose half-open span contains time_seconds.
+
+        Matches ``start_time <= time_seconds < end_time``.  Returns ``None``
+        when the time lies outside every segment or no package is loaded.
+        """
+        if self._package is None or self._duration <= 0:
+            return None
+        segments = self._package.song_dna.structure.segments
+        for i, seg in enumerate(segments):
+            if seg.timing.start_time <= time_seconds < seg.timing.end_time:
+                return i
+        return None
+
+    @staticmethod
+    def _fmt_time(seconds: float) -> str:
+        """Format a seconds value as MM:SS for readouts."""
+        total = max(0, int(seconds))
+        return f"{total // 60:02d}:{total % 60:02d}"
+
     def set_playhead(self, current_sec: float) -> None:
         self._playhead_sec = max(0.0, min(current_sec, self._duration))
         self.update()
 
     def mousePressEvent(self, event) -> None:
-        if self._duration > 0 and self.width() > 0:
-            ratio = max(0.0, min(event.position().x() / self.width(), 1.0))
-            target_sec = ratio * self._duration
-            self.seek_requested.emit(target_sec)
-            self.set_playhead(target_sec)
+        if self._duration <= 0 or self.width() <= 0:
+            return
+        ratio = max(0.0, min(event.position().x() / self.width(), 1.0))
+        target_sec = ratio * self._duration
+
+        idx = self._segment_at(target_sec)
+        if idx is not None:
+            # Clicking inside a structural segment seeks to its start time.
+            self._selected_segment = idx
+            seek_sec = self._package.song_dna.structure.segments[idx].timing.start_time
+        else:
+            # No segment under the pointer: keep exact-position seeking.
+            self._selected_segment = None
+            seek_sec = target_sec
+
+        self.seek_requested.emit(seek_sec)
+        self.set_playhead(seek_sec)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._package is None or self._duration <= 0 or self.width() <= 0:
+            return
+        ratio = max(0.0, min(event.position().x() / self.width(), 1.0))
+        hover = self._segment_at(ratio * self._duration)
+        if hover != self._hover_segment:
+            self._hover_segment = hover
+            self.update()
+
+        if hover is not None:
+            seg = self._package.song_dna.structure.segments[hover]
+            QToolTip.showText(
+                event.globalPosition().toPoint(),
+                f"Segment {hover + 1}\n{self._fmt_time(seg.timing.start_time)} – {self._fmt_time(seg.timing.end_time)}\nDuration: {seg.timing.duration:.1f}s",
+                self,
+            )
+
+    def leaveEvent(self, event) -> None:
+        self._hover_segment = None
+        self.update()
+        super().leaveEvent(event)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -74,22 +132,43 @@ class TimelineView(QWidget):
 
         # 2. Structural Segment Blocks
         structure = self._package.song_dna.structure
-        for seg in structure.segments:
+        playing_idx = self._segment_at(self._playhead_sec)
+        for i, seg in enumerate(structure.segments):
             seg_start = (seg.timing.start_time / self._duration) * w
             seg_w = (seg.timing.duration / self._duration) * w
-            label = seg.context.label.value.lower()
-            color = QColor(SEGMENT_COLORS.get(label, "#2D3748"))
-            color.setAlpha(60)
-
             rect = QRectF(seg_start, 0, seg_w, h - 22)
+
+            # Display-only neutral tint: the extractor labels every segment
+            # UNKNOWN, so semantic captions are never rendered.
+            color = QColor(SEGMENT_COLORS.get("unknown", "#2D3748"))
+            color.setAlpha(120 if i == self._selected_segment else 60)
             painter.fillRect(rect, color)
 
+            # Hierarchy: selected > currently playing > hovered > normal.
+            if i == self._selected_segment:
+                painter.setPen(QPen(QColor("#4FD1C5"), 2))
+                painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+            elif i == playing_idx:
+                painter.setPen(QPen(QColor("#63B3ED"), 1))
+                painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+            elif i == self._hover_segment:
+                painter.setPen(QPen(QColor("#718096"), 1))
+                painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+
+            # Boundary separator at every segment start.
             painter.setPen(QPen(QColor("#4A5568"), 1))
             painter.drawLine(int(seg_start), 0, int(seg_start), int(h - 22))
 
-            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-            painter.setPen(QColor("#CBD5E0"))
-            painter.drawText(QRectF(seg_start + 4, 4, seg_w - 8, 16), Qt.AlignmentFlag.AlignLeft, label.upper())
+            # Neutral caption only when the segment is wide enough to fit.
+            if seg_w >= 30:
+                painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+                painter.setPen(QColor("#CBD5E0"))
+                painter.drawText(
+                    QRectF(seg_start + 4, 4, seg_w - 8, 16),
+                    Qt.AlignmentFlag.AlignLeft,
+                    f"S{i + 1}",
+                )
+
 
         # 3. Waveform Peaks
         if self._waveform_peaks is not None:
