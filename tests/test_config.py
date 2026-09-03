@@ -79,7 +79,7 @@ class TestEchoInsightConfig:
 
 class TestPathsConfig:
     def test_sub_dir_derivation(self) -> None:
-        root = Path("/tmp/echoinsight_test")
+        root = Path("/tmp/echoinsight_test").resolve()
         paths = PathsConfig(data_root=root)
         assert paths.data_root == root
         assert paths.raw_audio == root / "raw_audio"
@@ -98,7 +98,7 @@ class TestPathsConfig:
             PathsConfig(data_root=Path("relative/path"))
 
     def test_frozen(self) -> None:
-        paths = PathsConfig(data_root=Path("/tmp/test"))
+        paths = PathsConfig(data_root=Path("/tmp/test").resolve())
         with pytest.raises(dataclasses.FrozenInstanceError):
             paths.data_root = Path("/other")  # type: ignore[misc]
 

@@ -90,10 +90,10 @@ def test_resolve_data_path_returns_absolute(tmp_path: Path) -> None:
 
 def test_resolve_data_path_rejects_absolute() -> None:
     config = EchoInsightConfig()
-    prefs = UserPreferences(data_root=Path("/tmp"))
+    prefs = UserPreferences(data_root=Path("/tmp").resolve())
     ctx = ApplicationContext(config=config, preferences=prefs)
     with pytest.raises(ValueError, match="relative_uri must be a relative path"):
-        ctx.resolve_data_path("/etc/passwd")
+        ctx.resolve_data_path(Path("/etc/passwd").resolve())
 
 
 def test_resolve_data_path_nested(tmp_path: Path) -> None:

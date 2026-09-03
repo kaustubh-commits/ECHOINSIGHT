@@ -1,7 +1,7 @@
 """
 extractor.py — Feature extraction pipeline that converts a raw
 audio file into a v2 SongDNA aggregate (SongDNA + StructureDNA +
-SegmentDNA[]).
+SegmentDNA[]) and optionally separates 4-stem tracks.
 
 The pipeline is divided into deterministic stages:
 
@@ -12,45 +12,39 @@ The pipeline is divided into deterministic stages:
 5.  Compute Per-Segment DSP (v2 branch)
 6.  Build Manifest
 7.  Assemble SongDNA v2
+8.  (Optional) 4-Stem Separation + Stem Acoustic Analysis
 
 Public API
 ----------
 - ``extract_song_dna(file_path)``   — in-memory extraction (backward compatible)
 - ``extract_and_save(file_path, data_root)`` — extraction + NPZ persistence
-
-Migration
----------
-A developer-only ``_BUILD_V2`` flag selects between the two branches.
-Both branches return the **v2** ``SongDNA`` type:
-
-- ``_BUILD_V2 = False`` (default): the legacy v1 global features are
-  adapted into a v2 ``SongDNA`` with a **single global segment**
-  covering the whole track.  This keeps every consumer on the v2 type
-  while the rest of the system migrates.
-- ``_BUILD_V2 = True``: full structural segmentation via
-  ``segmentation.detect_segments`` and per-segment DSP via
-  ``segment_dsp.compute_segment_dsp``.
-
-See ``docs/MIGRATION.md`` for removal criteria.
+- ``extract_full_pipeline(file_path, data_root, separate_stems)`` — unified Pillar 1 + Pillar 2
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import datetime
 import logging
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import librosa
 import numpy as np
 
+from src.analysis.frame_store import FrameStore
+from src.analysis.segment_dsp import compute_segment_dsp
+from src.analysis.segmentation import detect_segments
+from src.analysis.separator import EchoSeparator
+from src.analysis.stem_analyzer import StemAnalysisResult, StemAnalyzer
 from src.core.analysis_manifest import AnalysisManifest, compute_config_hash
 from src.core.enums import LabelType
 from src.core.frame_reference import FrameReference
 from src.core.identifiers import SegmentIndex, SongID, generate_song_id
 from src.core.song_dna import SongDNA, SongMetadata, SongSummary
+from src.core.stems import SeparatedTrack
 from src.core.structure import (
     BoundaryConfidence,
     SegmentContext,
@@ -62,9 +56,6 @@ from src.core.structure import (
     SegmentTiming,
     StructureDNA,
 )
-from src.analysis.frame_store import FrameStore
-from src.analysis.segmentation import detect_segments
-from src.analysis.segment_dsp import compute_segment_dsp
 
 logger = logging.getLogger(__name__)
 
@@ -72,47 +63,38 @@ logger = logging.getLogger(__name__)
 # Migration flag
 # ---------------------------------------------------------------------------
 
-# MIGRATION: This flag determines which extraction pipeline to use.
-# Removal criteria: delete this flag and the v1 branch when:
-# - Workspace consumes SongDNA v2
-# - Visualization consumes SongDNA v2
-# - Comparison consumes SongDNA v2
-# - All extraction tests pass using v2
-# - No production code imports dna_schema.py
-_BUILD_V2 = False  # ← Set to True when ready to test v2 pipeline
+_BUILD_V2 = False  # Set to True when activating full structural segmentation
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-SAMPLE_RATE: int = 22050          # Locked. Do not parameterize.
+SAMPLE_RATE: int = 22050          # Locked per Extraction Contract
+N_MFCC: int = 13
+HOP_LENGTH: int = 512
+N_FFT: int = 2048
+FEATURE_SET_VERSION: str = "v2"
+EXTRACTOR_VERSION: str = "2.0.0"
+SCHEMA_VERSION: str = "1.0.0"
 
-# Krumhansl-Schmuckler key profiles (Krumhansl & Kessler, 1982)
 _MAJOR_PROFILE: np.ndarray = np.array(
-    [
-        6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
-        2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
-    ]
+    [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
 )
-
 _MINOR_PROFILE: np.ndarray = np.array(
-    [
-        6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
-        2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
-    ]
+    [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 )
-
 _KEY_NAMES: List[str] = [
     "C", "C#", "D", "D#", "E", "F",
     "F#", "G", "G#", "A", "A#", "B",
 ]
 
-N_MFCC: int = 13          # Number of MFCC coefficients to keep
-HOP_LENGTH: int = 512     # Hop length (samples) for frame-level analysis
-N_FFT: int = 2048         # FFT window size
-FEATURE_SET_VERSION: str = "v2"
-EXTRACTOR_VERSION: str = "2.0.0"
-SCHEMA_VERSION: str = "1.0.0"  # AnalysisManifest schema version
+
+@dataclass(frozen=True)
+class ExtractedSongPackage:
+    """Unified container for all Pillar 1 and Pillar 2 extraction outputs."""
+    song_dna: SongDNA
+    separated_track: Optional[SeparatedTrack] = None
+    stem_analysis: Optional[StemAnalysisResult] = None
 
 
 # ======================================================================
@@ -121,26 +103,13 @@ SCHEMA_VERSION: str = "1.0.0"  # AnalysisManifest schema version
 
 
 def _load_audio(file_path: str) -> Tuple[np.ndarray, int]:
-    """Load an audio file and return the time series and sample rate.
-
-    The sample rate is **locked to 22050 Hz** per the Extraction
-    Contract.  Do not parameterize this.
-
-    Parameters
-    ----------
-    file_path : str
-        Path to a supported audio file (MP3, WAV, FLAC, OGG, M4A, etc.).
-
-    Returns
-    -------
-    tuple[np.ndarray, int]
-        ``(y, sr)`` where ``y`` is the mono audio time series and
-        ``sr`` is 22050.
-    """
+    """Load an audio file and return the time series and sample rate."""
     logger.info("Loading audio: %s", file_path)
     y, sr = librosa.load(file_path, sr=SAMPLE_RATE, mono=True)
-    logger.debug("Loaded: sr=%d, samples=%d, duration=%.2fs",
-                 sr, len(y), len(y) / sr)
+    logger.debug(
+        "Loaded: sr=%d, samples=%d, duration=%.2fs",
+        sr, len(y), len(y) / sr
+    )
     return y, sr
 
 
@@ -150,27 +119,10 @@ def _load_audio(file_path: str) -> Tuple[np.ndarray, int]:
 
 
 def _extract_frame_features(y: np.ndarray, sr: int) -> Dict[str, np.ndarray]:
-    """Extract all frame-level DSP features for a track.
-
-    Each array preserves librosa's natural output shape — no flattening.
-
-    Returns
-    -------
-    dict[str, np.ndarray]
-        ``"rms"``        — (n_frames,)   — RMS energy per frame
-        ``"centroid"``   — (n_frames,)   — spectral centroid (Hz)
-        ``"bandwidth"``  — (n_frames,)   — spectral bandwidth (Hz)
-        ``"rolloff"``    — (n_frames,)   — spectral rolloff (Hz)
-        ``"zcr"``        — (n_frames,)   — zero-crossing rate
-        ``"mfcc"``       — (13, n_frames) — MFCC coefficients
-        ``"chroma"``     — (12, n_frames) — chromagram (CQT)
-        ``"contrast"``   — (7, n_frames)  — spectral contrast
-        ``"tonnetz"``    — (6, n_frames)  — tonal centroid
-    """
+    """Extract all frame-level DSP features for a track."""
     logger.debug("Extracting frame features (hop_length=%d)", HOP_LENGTH)
     features: Dict[str, np.ndarray] = {}
 
-    # --- 1-D features ---
     features["rms"] = librosa.feature.rms(y=y, hop_length=HOP_LENGTH).flatten()
     features["centroid"] = librosa.feature.spectral_centroid(
         y=y, sr=sr, hop_length=HOP_LENGTH, n_fft=N_FFT
@@ -185,24 +137,18 @@ def _extract_frame_features(y: np.ndarray, sr: int) -> Dict[str, np.ndarray]:
         y=y, hop_length=HOP_LENGTH
     ).flatten()
 
-    # --- 2-D features ---
     features["mfcc"] = librosa.feature.mfcc(
         y=y, sr=sr, n_mfcc=N_MFCC, hop_length=HOP_LENGTH, n_fft=N_FFT
-    )  # shape (13, n_frames)
+    )
 
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=HOP_LENGTH)
-    features["chroma"] = chroma  # shape (12, n_frames)
+    features["chroma"] = chroma
 
     features["contrast"] = librosa.feature.spectral_contrast(
         y=y, sr=sr, hop_length=HOP_LENGTH, n_fft=N_FFT
-    )  # shape (7, n_frames)
+    )
 
-    features["tonnetz"] = librosa.feature.tonnetz(
-        chroma=chroma, sr=sr
-    )  # shape (6, n_frames)
-
-    logger.debug("Extracted %d feature arrays, %d frames each",
-                 len(features), features["rms"].shape[0])
+    features["tonnetz"] = librosa.feature.tonnetz(chroma=chroma, sr=sr)
     return features
 
 
@@ -212,39 +158,28 @@ def _extract_frame_features(y: np.ndarray, sr: int) -> Dict[str, np.ndarray]:
 
 
 def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[int, ...]]:
-    """Detect beat positions and estimate tempo.
+    """Detect beat positions and estimate tempo with fallback for ambient/pure tones."""
+    try:
+        tempo, beat_frames = librosa.beat.beat_track(
+            y=y, sr=sr, hop_length=HOP_LENGTH
+        )
+        raw_tempo = float(np.round(np.asarray(tempo).flatten()[0], 2))
+    except Exception:
+        raw_tempo = 0.0
+        beat_frames = np.array([])
 
-    Parameters
-    ----------
-    y : np.ndarray
-        Audio time series.
-    sr : int
-        Sample rate.
-
-    Returns
-    -------
-    tuple[float, float, tuple[int, ...]]
-        ``(tempo, confidence, beat_frames)``.
-        ``tempo`` is in BPM, rounded to 2 decimal places.
-        ``confidence`` is the beat tracker's confidence (0.0–1.0).
-        ``beat_frames`` are frame indices into the feature arrays.
-    """
-    tempo, beat_frames = librosa.beat.beat_track(
-        y=y, sr=sr, hop_length=HOP_LENGTH
-    )
-    tempo = float(np.round(np.asarray(tempo).flatten()[0], 2))
-
-    # librosa does not expose a native confidence metric for beat_track.
-    # We use 1.0 as a default — future versions may derive confidence
-    # from onset strength autocorrelation.
-    confidence: float = 1.0
+    if raw_tempo <= 0.0:
+        # Fallback for static tones or zero-energy audio
+        final_tempo = 120.0
+        confidence = 0.0
+    else:
+        final_tempo = raw_tempo
+        confidence = 1.0
 
     beat_frames_tuple: Tuple[int, ...] = tuple(
         int(b) for b in np.asarray(beat_frames).flatten()
     )
-
-    logger.debug("Tempo: %.2f BPM, %d beats detected", tempo, len(beat_frames_tuple))
-    return tempo, confidence, beat_frames_tuple
+    return final_tempo, confidence, beat_frames_tuple
 
 
 # ======================================================================
@@ -253,25 +188,12 @@ def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[int, ...]
 
 
 def _estimate_key(chroma_mean: np.ndarray) -> Tuple[Optional[str], float]:
-    """Krumhansl-Schmuckler key-finding algorithm.
-
-    Parameters
-    ----------
-    chroma_mean : np.ndarray
-        12-bin chroma vector averaged over the track (or segment).
-
-    Returns
-    -------
-    Tuple[Optional[str], float]
-        Detected key label (e.g. ``"C major"``) and correlation confidence
-        (0.0–1.0).  Returns ``(None, 0.0)`` if the chroma vector is flat.
-    """
+    """Krumhansl-Schmuckler key-finding algorithm."""
     total = float(np.sum(chroma_mean))
     if total < 1e-10:
         return None, 0.0
 
     chroma_norm = chroma_mean / total
-
     best_corr = -1.0
     best_key: Optional[str] = None
 
@@ -294,29 +216,7 @@ def _estimate_key(chroma_mean: np.ndarray) -> Tuple[Optional[str], float]:
 def _compute_global_statistics(
     features: Dict[str, np.ndarray], y: np.ndarray, sr: int
 ) -> Tuple[Dict[str, float], Dict[str, object]]:
-    """Reduce frame-level features to plain summary dicts.
-
-    This helper is shared by both the v1 (single-global-segment) and
-    v2 (segmented) paths.  It returns plain dicts rather than v1 domain
-    types so the extractor never imports ``dna_schema.py``.
-
-    Parameters
-    ----------
-    features : dict[str, np.ndarray]
-        Frame-level feature dictionary from ``_extract_frame_features``.
-    y : np.ndarray
-        Audio time series (for tuning estimation).
-    sr : int
-        Sample rate.
-
-    Returns
-    -------
-    tuple[dict[str, float], dict[str, object]]
-        ``(timbre_dict, tonal_dict)``:
-        timbre — rms_energy_mean, spectral_centroid_mean,
-                 spectral_bandwidth_mean, mfcc_mean (list)
-        tonal  — key, key_confidence, chroma_mean (list), tuning_offset
-    """
+    """Reduce frame-level features to plain summary dicts."""
     timbre: Dict[str, float] = {
         "rms_energy_mean": float(np.mean(features["rms"])),
         "spectral_centroid_mean": float(np.mean(features["centroid"])),
@@ -324,7 +224,7 @@ def _compute_global_statistics(
         "mfcc_mean": [float(v) for v in np.mean(features["mfcc"], axis=1)],
     }
 
-    chroma_mean_arr = np.mean(features["chroma"], axis=1)  # (12,)
+    chroma_mean_arr = np.mean(features["chroma"], axis=1)
     key, key_confidence = _estimate_key(chroma_mean_arr)
     tuning_offset = float(librosa.estimate_tuning(y=y, sr=sr))
 
@@ -334,16 +234,16 @@ def _compute_global_statistics(
         "chroma_mean": [float(v) for v in chroma_mean_arr],
         "tuning_offset": tuning_offset,
     }
-
-    logger.debug("Key: %s (confidence: %.2f), tuning: %.1f cents",
-                 key, key_confidence, tuning_offset)
     return timbre, tonal
 
 
-def _onset_strength_mean(y: np.ndarray, sr: int,
-                         start_s: float = 0.0,
-                         end_s: Optional[float] = None) -> float:
-    """Mean onset strength over a time range (defaults to the full track)."""
+def _onset_strength_mean(
+    y: np.ndarray,
+    sr: int,
+    start_s: float = 0.0,
+    end_s: Optional[float] = None,
+) -> float:
+    """Mean onset strength over a time range."""
     start_sample = int(start_s * sr)
     end_sample = int(end_s * sr) if end_s is not None else len(y)
     slice_y = y[start_sample:end_sample]
@@ -361,7 +261,7 @@ def _onset_strength_mean(y: np.ndarray, sr: int,
 
 
 def _build_manifest(sample_rate: int, hop_length: int) -> AnalysisManifest:
-    """Construct an ``AnalysisManifest`` for the current extraction."""
+    """Construct an AnalysisManifest for the current extraction."""
     config_hash = compute_config_hash(
         sample_rate=sample_rate,
         hop_length=hop_length,
@@ -369,7 +269,6 @@ def _build_manifest(sample_rate: int, hop_length: int) -> AnalysisManifest:
         feature_set_version=FEATURE_SET_VERSION,
     )
 
-    # Try to get git info — gracefully handle non-git environments
     git_commit = ""
     git_branch = ""
     try:
@@ -388,7 +287,7 @@ def _build_manifest(sample_rate: int, hop_length: int) -> AnalysisManifest:
         if result.returncode == 0:
             git_branch = result.stdout.strip()
     except Exception:
-        pass  # Not a git repository or git not installed — leave as ""
+        pass
 
     return AnalysisManifest(
         schema_version=SCHEMA_VERSION,
@@ -408,7 +307,7 @@ def _build_manifest(sample_rate: int, hop_length: int) -> AnalysisManifest:
 
 
 # ======================================================================
-# Stage 6 — Assembly (shared builders)
+# Stage 6 — Assembly
 # ======================================================================
 
 
@@ -418,7 +317,7 @@ def _build_song_summary(
     timbre: Dict[str, float],
     tonal: Dict[str, object],
 ) -> SongSummary:
-    """Build a v2 ``SongSummary`` from global statistics."""
+    """Build a v2 SongSummary from global statistics."""
     return SongSummary(
         tempo_estimate=tempo,
         tempo_confidence=tempo_confidence,
@@ -442,14 +341,8 @@ def _build_single_segment(
     tonal: Dict[str, object],
     onset_mean: float,
 ) -> SegmentDNA:
-    """Build a single-global-segment ``SegmentDNA`` for the v1 adapter.
-
-    Every global feature is placed into the segment's DSP so that the
-    v2 aggregate is fully populated even when structural segmentation is
-    disabled.
-    """
+    """Build a single-global-segment SegmentDNA for the v1 adapter."""
     timing = SegmentTiming(start_time=0.0, end_time=duration)
-
     rhythm = SegmentRhythm(
         tempo=tempo,
         tempo_confidence=tempo_confidence,
@@ -483,7 +376,6 @@ def _build_single_segment(
     )
 
     dsp = SegmentDSP(rhythm=rhythm, harmony=harmony, timbre=timbre_obj)
-
     context = SegmentContext(
         index=SegmentIndex(0),
         label=LabelType.UNKNOWN,
@@ -508,8 +400,7 @@ def _assemble_song_dna_v2(
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
-    """Assemble a complete v2 ``SongDNA`` aggregate."""
-    # Build boundary confidences (one per boundary between segments).
+    """Assemble a complete v2 SongDNA aggregate."""
     boundaries: List[BoundaryConfidence] = []
     for i in range(len(segments) - 1):
         boundaries.append(
@@ -555,13 +446,7 @@ def _assemble_v1_adapter(
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
-    """Assemble a v2 ``SongDNA`` from legacy v1 global features.
-
-    This is the v1 branch of the migration.  It produces a v2 ``SongDNA``
-    whose ``StructureDNA`` contains a **single global segment** covering
-    the whole track.  This keeps every consumer on the v2 type while the
-    rest of the system migrates (see ``docs/MIGRATION.md``).
-    """
+    """Assemble a v2 SongDNA from legacy v1 global features."""
     song_id = generate_song_id()
     timbre, tonal = _compute_global_statistics(features, y, sr)
     onset_mean = _onset_strength_mean(y, sr)
@@ -577,7 +462,6 @@ def _assemble_v1_adapter(
     )
 
     summary = _build_song_summary(tempo, tempo_confidence, timbre, tonal)
-
     return _assemble_song_dna_v2(
         song_id=song_id,
         filename=file_path,
@@ -601,27 +485,18 @@ def _assemble_v2_full(
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
-    """Assemble a full v2 ``SongDNA`` with structural segmentation."""
+    """Assemble a full v2 SongDNA with structural segmentation."""
     song_id = generate_song_id()
 
-    # Structural segmentation + per-segment DSP
     seg_ranges = detect_segments(y, sr)
     dsp_list = compute_segment_dsp(y, sr, seg_ranges)
 
-    # Fall back to a single global segment if nothing was detected
     if not seg_ranges:
         seg_ranges = [(0.0, duration)]
 
     segments: List[SegmentDNA] = []
     for i, ((start_s, end_s), dsp) in enumerate(zip(seg_ranges, dsp_list)):
-        # start_beat / end_beat are left as None: they represent indices
-        # into a per-segment beat grid, which is a future refinement.
-        # Frame indices are NOT beat indices; setting them here would
-        # violate the semantic contract of SegmentTiming.
-        timing = SegmentTiming(
-            start_time=start_s,
-            end_time=end_s,
-        )
+        timing = SegmentTiming(start_time=start_s, end_time=end_s)
         context = SegmentContext(
             index=SegmentIndex(i),
             label=LabelType.UNKNOWN,
@@ -636,7 +511,6 @@ def _assemble_v2_full(
             )
         )
 
-    # SongSummary from global statistics
     timbre, tonal = _compute_global_statistics(features, y, sr)
     summary = _build_song_summary(tempo, tempo_confidence, timbre, tonal)
 
@@ -653,48 +527,17 @@ def _assemble_v2_full(
 
 
 # ======================================================================
-# Public API — extract_song_dna (backward compatible)
+# Public API — extract_song_dna & extract_and_save
 # ======================================================================
 
 
 def extract_song_dna(file_path: str) -> SongDNA:
-    """Load an audio file and return its v2 SongDNA fingerprint.
-
-    This is the **in-memory only** extraction path.  It computes
-    summary statistics and beat information but does **not** persist
-    frame-level data to NPZ.  The returned ``SongDNA`` will have
-    ``frames=None`` and ``manifest=None``.
-
-    The returned type is always the **v2** ``SongDNA`` (see
-    ``docs/MIGRATION.md``).  When ``_BUILD_V2`` is False the v1
-    branch constructs a v2 ``SongDNA`` with a single global segment.
-
-    For full extraction with NPZ persistence, use ``extract_and_save()``.
-
-    Parameters
-    ----------
-    file_path : str
-        Path to a supported audio file (MP3, WAV, FLAC, OGG, M4A).
-
-    Returns
-    -------
-    SongDNA
-        Immutable v2 dataclass holding the extracted features.
-    """
-    # Stage 1 — Load (locked to 22050 Hz)
+    """Load an audio file and return its v2 SongDNA fingerprint in-memory."""
     y, sr = _load_audio(file_path)
-
-    # Stage 2 — Frame features
     features = _extract_frame_features(y, sr)
-
-    # Stage 3 — Beats
     tempo, confidence, beat_frames = _detect_beats(y, sr)
-
-    # Stage 4 — Global statistics
     duration = float(librosa.get_duration(y=y, sr=sr))
 
-    # Stage 5 — Manifest (no manifest for in-memory path)
-    # Stage 6 — Assemble
     if _BUILD_V2:
         return _assemble_v2_full(
             file_path=file_path,
@@ -722,42 +565,12 @@ def extract_song_dna(file_path: str) -> SongDNA:
 
 
 def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
-    """Extract SongDNA and persist frame-level data to NPZ storage.
-
-    This is the **full extraction path**.  It:
-    1. Loads the audio file
-    2. Extracts all frame-level features
-    3. Saves them as a compressed NPZ file under ``data_root / frames/``
-    4. Constructs a ``FrameReference`` pointing to the NPZ file
-    5. Builds an ``AnalysisManifest`` recording extraction provenance
-    6. Returns a v2 ``SongDNA`` with ``frames`` and ``manifest`` populated
-
-    Parameters
-    ----------
-    file_path : str
-        Path to a supported audio file.
-    data_root : Path
-        Absolute path to the EchoInsight data root directory.
-        NPZ files are saved under ``data_root / frames / {stem}.npz``.
-
-    Returns
-    -------
-    SongDNA
-        v2 ``SongDNA`` with ``frames`` and ``manifest`` populated.
-    """
-    # Stage 1 — Load
+    """Extract SongDNA and persist frame-level data to NPZ storage."""
     y, sr = _load_audio(file_path)
-
-    # Stage 2 — Frame features
     features = _extract_frame_features(y, sr)
-
-    # Stage 3 — Beats
     tempo, confidence, beat_frames = _detect_beats(y, sr)
-
-    # Stage 4 — Global statistics
     duration = float(librosa.get_duration(y=y, sr=sr))
 
-    # ---- NPZ persistence ----
     stem = Path(file_path).stem
     npz_uri = f"frames/{stem}.npz"
     npz_path = (data_root / npz_uri).resolve()
@@ -770,14 +583,8 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
         sample_rate=sr,
         duration=duration,
     )
-    logger.info("Frame data saved to %s", npz_path)
-
-    # Stage 5 — Manifest
     manifest = _build_manifest(sample_rate=sr, hop_length=HOP_LENGTH)
-    logger.debug("Manifest: extractor=%s, hash=%s",
-                 manifest.extractor_version, manifest.config_hash)
 
-    # Stage 6 — Assemble
     if _BUILD_V2:
         return _assemble_v2_full(
             file_path=file_path,
@@ -801,4 +608,58 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
         tempo_confidence=confidence,
         frames=frame_ref,
         manifest=manifest,
+    )
+
+
+def extract_full_pipeline(
+    file_path: str | Path,
+    data_root: Optional[Path] = None,
+    separate_stems: bool = False,
+    custom_model_path: Optional[str | Path] = None,
+) -> ExtractedSongPackage:
+    """Unified entry point executing both Pillar 1 and Pillar 2.
+
+    Parameters
+    ----------
+    file_path : str | Path
+        Path to the target audio file.
+    data_root : Optional[Path]
+        If provided, persists frame NPZ data under data_root / frames/.
+    separate_stems : bool
+        If True, executes HTDemucs separation and stem acoustic analysis.
+    custom_model_path : Optional[str | Path]
+        Path to custom fine-tuned weights (e.g. best_htdemucs_finetuned.th).
+
+    Returns
+    -------
+    ExtractedSongPackage
+        Contains SongDNA, optional SeparatedTrack, and optional StemAnalysisResult.
+    """
+    path_obj = Path(file_path)
+
+    # 1. Pillar 1: Extract SongDNA
+    if data_root is not None:
+        song_dna = extract_and_save(str(path_obj), data_root)
+    else:
+        song_dna = extract_song_dna(str(path_obj))
+
+    separated_track: Optional[SeparatedTrack] = None
+    stem_analysis: Optional[StemAnalysisResult] = None
+
+    # 2. Pillar 2: 4-Stem Separation & Analysis
+    if separate_stems:
+        cache_dir = (data_root / "stems") if data_root else None
+        separator = EchoSeparator(
+            model_path=custom_model_path,
+            cache_dir=cache_dir,
+        )
+        separated_track = separator.separate(path_obj)
+
+        analyzer = StemAnalyzer()
+        stem_analysis = analyzer.analyze(separated_track)
+
+    return ExtractedSongPackage(
+        song_dna=song_dna,
+        separated_track=separated_track,
+        stem_analysis=stem_analysis,
     )
