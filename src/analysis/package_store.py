@@ -83,8 +83,19 @@ class PackageStore:
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> EnrichedSongPackage:
-        """Constructs an EnrichedSongPackage from a parsed dictionary."""
-        song_dna = _reconstruct_dataclass(SongDNA, data["song_dna"])
+        """Constructs an EnrichedSongPackage from a parsed dictionary.
+
+        Supports both wrapped package dicts and raw standalone SongDNA JSONs.
+        """
+        # Determine if payload is wrapped or direct SongDNA
+        if "song_dna" in data and isinstance(data["song_dna"], dict):
+            dna_dict = data["song_dna"]
+        elif "metadata" in data and "structure" in data:
+            dna_dict = data
+        else:
+            raise KeyError("JSON missing 'song_dna' or root 'metadata'/'structure' keys")
+
+        song_dna = _reconstruct_dataclass(SongDNA, dna_dict)
 
         separated_track: Optional[SeparatedTrack] = None
         if data.get("separated_track"):
