@@ -4,6 +4,7 @@ deck_view.py — Resilient Deck widget with explicit audio routing and stem fall
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 import soundfile as sf
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from src.analysis.extractor import extract_full_pipeline
 from src.analysis.package_store import PackageStore
+from src.analysis.separator import load_pre_separated
 from src.analysis.spotify_enricher import SpotifyEnricher
 from src.core.package import EnrichedSongPackage
 from src.ui.widgets.stem_mixer import StemMixer
@@ -326,6 +328,12 @@ class DeckView(QGroupBox):
                 self.load_package(pkg)
             else:
                 base_pkg = extract_full_pipeline(file_path=selected, separate_stems=False)
+                # Attach any pre-separated demo stems that live alongside the
+                # chosen audio (e.g. ``data/demo_stems/heart_peripheral/``).
+                if base_pkg.separated_track is None:
+                    discovered = load_pre_separated(selected)
+                    if discovered is not None:
+                        base_pkg = dataclasses.replace(base_pkg, separated_track=discovered)
                 enricher = SpotifyEnricher()
                 enriched = enricher.enrich(base_pkg)
                 self.load_package(enriched, audio_path=selected)

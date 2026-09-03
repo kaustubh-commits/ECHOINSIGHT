@@ -161,3 +161,73 @@ class EchoSeparator:
             stems=stem_paths,
             model_name=model_tag,
         )
+
+def load_pre_separated(
+    audio_path: str | Path,
+    stem_dir: Optional[str | Path] = None,
+) -> Optional[SeparatedTrack]:
+    """Locate a pre-separated 4-stem set for audio_path and return SeparatedTrack.
+
+    Looks first in the directory containing the audio file (so loading
+    ``.../heart_peripheral/Mixture.wav`` discovers its sibling stems), then
+    falls back to the project-relative ``data/demo_stems/<name>`` directory.
+    Stem filenames are matched case-insensitively; both ``others.wav`` and
+    ``other.wav`` are accepted for the OTHER stem.
+
+    Returns ``None`` when no complete stem set is found.
+    """
+    path = Path(audio_path)
+
+    candidates = []
+    if stem_dir is not None:
+        candidates.append(Path(stem_dir).resolve())
+    else:
+        candidates.append(path.parent.resolve())
+    project_root = Path(__file__).resolve().parents[2]
+    name_token = "".join(ch if ch.isalnum() else "_" for ch in path.stem.lower())
+    candidates.append(project_root / "data" / "demo_stems" / name_token)
+
+    seen = set()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        if not cand.is_dir():
+            continue
+        files = {f.name.lower(): f for f in cand.iterdir() if f.is_file()}
+
+        def pick(*names):
+            for n in names:
+                if n in files:
+                    return files[n]
+            return None
+
+        vocals = pick("vocals.wav")
+        drums = pick("drums.wav")
+        bass = pick("bass.wav")
+        other = pick("others.wav", "other.wav")
+        if vocals is None or drums is None or bass is None or other is None:
+            continue
+
+        mixture = pick("mixture.wav")
+        info_source = vocals if vocals is not None else mixture
+        sample_rate = 44100
+        duration = 0.0
+        if info_source is not None:
+            try:
+                info = sf.info(str(info_source))
+                sample_rate = int(info.samplerate)
+                duration = float(info.duration)
+            except Exception:
+                pass
+
+        original = path if path.is_file() else (mixture if mixture is not None else vocals)
+        return SeparatedTrack(
+            track_id=cand.name,
+            original_audio=original.resolve(),
+            sample_rate=sample_rate,
+            duration_seconds=duration,
+            stems=StemPaths(vocals=vocals, drums=drums, bass=bass, other=other),
+            model_name="pre-separated",
+        )
+    return None
