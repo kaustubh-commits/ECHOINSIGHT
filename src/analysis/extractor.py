@@ -1,13 +1,13 @@
 """
 extractor.py — Feature extraction pipeline that converts a raw
 audio file into a v2 SongDNA aggregate (SongDNA + StructureDNA +
-SegmentDNA[]).
+SegmentDNA[] + Timeline).
 
 The pipeline is divided into deterministic stages:
 
 1.  Load Audio (locked to 22050 Hz)
 2.  Extract Frame Features
-3.  Detect Beats
+3.  Detect Beats (+ build Timeline)
 4.  Segment Structure (v2 branch) — or single-global-segment (v1 branch)
 5.  Compute Per-Segment DSP (v2 branch)
 6.  Build Manifest
@@ -62,6 +62,7 @@ from src.core.structure import (
     SegmentTiming,
     StructureDNA,
 )
+from src.core.timeline import Timeline
 from src.analysis.frame_store import FrameStore
 from src.analysis.segmentation import detect_segments
 from src.analysis.segment_dsp import compute_segment_dsp
@@ -79,7 +80,7 @@ logger = logging.getLogger(__name__)
 # - Comparison consumes SongDNA v2
 # - All extraction tests pass using v2
 # - No production code imports dna_schema.py
-_BUILD_V2 = False  # ← Set to True when ready to test v2 pipeline
+_BUILD_V2 = True  # ← v2 pipeline enabled by default
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -111,7 +112,7 @@ N_MFCC: int = 13          # Number of MFCC coefficients to keep
 HOP_LENGTH: int = 512     # Hop length (samples) for frame-level analysis
 N_FFT: int = 2048         # FFT window size
 FEATURE_SET_VERSION: str = "v2"
-EXTRACTOR_VERSION: str = "2.0.0"
+EXTRACTOR_VERSION: str = "2.1.0"
 SCHEMA_VERSION: str = "1.0.0"  # AnalysisManifest schema version
 
 
@@ -207,12 +208,12 @@ def _extract_frame_features(y: np.ndarray, sr: int) -> Dict[str, np.ndarray]:
 
 
 # ======================================================================
-# Stage 3 — Beat Detection
+# Stage 3 — Beat Detection + Timeline
 # ======================================================================
 
 
-def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[int, ...]]:
-    """Detect beat positions and estimate tempo.
+def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[float, ...]]:
+    """Detect beat positions (in seconds) and estimate tempo.
 
     Parameters
     ----------
@@ -223,14 +224,15 @@ def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[int, ...]
 
     Returns
     -------
-    tuple[float, float, tuple[int, ...]]
-        ``(tempo, confidence, beat_frames)``.
+    tuple[float, float, tuple[float, ...]]
+        ``(tempo, confidence, beat_times)``.
         ``tempo`` is in BPM, rounded to 2 decimal places.
         ``confidence`` is the beat tracker's confidence (0.0–1.0).
-        ``beat_frames`` are frame indices into the feature arrays.
+        ``beat_times`` are beat positions in **seconds** from the start
+        of the track.
     """
-    tempo, beat_frames = librosa.beat.beat_track(
-        y=y, sr=sr, hop_length=HOP_LENGTH
+    tempo, beat_times = librosa.beat.beat_track(
+        y=y, sr=sr, hop_length=HOP_LENGTH, trim=False, units="time"
     )
     tempo = float(np.round(np.asarray(tempo).flatten()[0], 2))
 
@@ -239,12 +241,16 @@ def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[int, ...]
     # from onset strength autocorrelation.
     confidence: float = 1.0
 
-    beat_frames_tuple: Tuple[int, ...] = tuple(
-        int(b) for b in np.asarray(beat_frames).flatten()
+    beat_times_tuple: Tuple[float, ...] = tuple(
+        float(b) for b in np.asarray(beat_times).flatten()
     )
 
-    logger.debug("Tempo: %.2f BPM, %d beats detected", tempo, len(beat_frames_tuple))
-    return tempo, confidence, beat_frames_tuple
+    logger.debug(
+        "Tempo: %.2f BPM, %d beats detected",
+        tempo,
+        len(beat_times_tuple),
+    )
+    return tempo, confidence, beat_times_tuple
 
 
 # ======================================================================
@@ -505,6 +511,7 @@ def _assemble_song_dna_v2(
     sr: int,
     segments: List[SegmentDNA],
     summary: SongSummary,
+    timeline: Optional[Timeline] = None,
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
@@ -538,9 +545,10 @@ def _assemble_song_dna_v2(
         metadata=metadata,
         summary=summary,
         structure=structure,
+        timeline=timeline,
         frames=frames,
         manifest=manifest,
-        schema_version="2.0.0",
+        schema_version="2.1.0",
     )
 
 
@@ -552,6 +560,7 @@ def _assemble_v1_adapter(
     features: Dict[str, np.ndarray],
     tempo: float,
     tempo_confidence: float,
+    beat_times: Optional[Tuple[float, ...]] = None,
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
@@ -578,6 +587,10 @@ def _assemble_v1_adapter(
 
     summary = _build_song_summary(tempo, tempo_confidence, timbre, tonal)
 
+    timeline = None
+    if beat_times:
+        timeline = Timeline.build(beats=beat_times, duration=duration)
+
     return _assemble_song_dna_v2(
         song_id=song_id,
         filename=file_path,
@@ -585,6 +598,7 @@ def _assemble_v1_adapter(
         sr=sr,
         segments=[segment],
         summary=summary,
+        timeline=timeline,
         frames=frames,
         manifest=manifest,
     )
@@ -598,6 +612,7 @@ def _assemble_v2_full(
     y: np.ndarray,
     tempo: float,
     tempo_confidence: float,
+    beat_times: Optional[Tuple[float, ...]] = None,
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
@@ -640,6 +655,10 @@ def _assemble_v2_full(
     timbre, tonal = _compute_global_statistics(features, y, sr)
     summary = _build_song_summary(tempo, tempo_confidence, timbre, tonal)
 
+    timeline = None
+    if beat_times:
+        timeline = Timeline.build(beats=beat_times, duration=duration)
+
     return _assemble_song_dna_v2(
         song_id=song_id,
         filename=file_path,
@@ -647,6 +666,7 @@ def _assemble_v2_full(
         sr=sr,
         segments=segments,
         summary=summary,
+        timeline=timeline,
         frames=frames,
         manifest=manifest,
     )
@@ -688,13 +708,15 @@ def extract_song_dna(file_path: str) -> SongDNA:
     features = _extract_frame_features(y, sr)
 
     # Stage 3 — Beats
-    tempo, confidence, beat_frames = _detect_beats(y, sr)
+    tempo, confidence, beat_times = _detect_beats(y, sr)
 
     # Stage 4 — Global statistics
     duration = float(librosa.get_duration(y=y, sr=sr))
 
     # Stage 5 — Manifest (no manifest for in-memory path)
     # Stage 6 — Assemble
+    beat_times_tuple: Optional[Tuple[float, ...]] = beat_times
+
     if _BUILD_V2:
         return _assemble_v2_full(
             file_path=file_path,
@@ -704,6 +726,7 @@ def extract_song_dna(file_path: str) -> SongDNA:
             y=y,
             tempo=tempo,
             tempo_confidence=confidence,
+            beat_times=beat_times_tuple,
             frames=None,
             manifest=None,
         )
@@ -716,6 +739,7 @@ def extract_song_dna(file_path: str) -> SongDNA:
         features=features,
         tempo=tempo,
         tempo_confidence=confidence,
+        beat_times=beat_times_tuple,
         frames=None,
         manifest=None,
     )
@@ -752,7 +776,7 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
     features = _extract_frame_features(y, sr)
 
     # Stage 3 — Beats
-    tempo, confidence, beat_frames = _detect_beats(y, sr)
+    tempo, confidence, beat_times = _detect_beats(y, sr)
 
     # Stage 4 — Global statistics
     duration = float(librosa.get_duration(y=y, sr=sr))
@@ -778,6 +802,8 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
                  manifest.extractor_version, manifest.config_hash)
 
     # Stage 6 — Assemble
+    beat_times_tuple: Optional[Tuple[float, ...]] = beat_times
+
     if _BUILD_V2:
         return _assemble_v2_full(
             file_path=file_path,
@@ -787,6 +813,7 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
             y=y,
             tempo=tempo,
             tempo_confidence=confidence,
+            beat_times=beat_times_tuple,
             frames=frame_ref,
             manifest=manifest,
         )
@@ -799,6 +826,7 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
         features=features,
         tempo=tempo,
         tempo_confidence=confidence,
+        beat_times=beat_times_tuple,
         frames=frame_ref,
         manifest=manifest,
     )
