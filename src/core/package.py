@@ -11,12 +11,14 @@ Encapsulates:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from src.analysis.stem_analyzer import StemAnalysisResult
 from src.core.song_dna import SongDNA
 from src.core.spotify import SpotifyMetadata
 from src.core.stems import SeparatedTrack
+
+if TYPE_CHECKING:
+    from src.analysis.stem_analyzer import StemAnalysisResult
 
 
 @dataclass(frozen=True)
