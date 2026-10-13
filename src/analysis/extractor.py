@@ -119,7 +119,7 @@ N_MFCC: int = 13          # Number of MFCC coefficients to keep
 HOP_LENGTH: int = 512     # Hop length (samples) for frame-level analysis
 N_FFT: int = 2048         # FFT window size
 FEATURE_SET_VERSION: str = "v2"
-EXTRACTOR_VERSION: str = "2.1.0"
+EXTRACTOR_VERSION: str = "2.2.0"  # 2.2.0: key estimation fixed (keys were mirrored)
 SCHEMA_VERSION: str = "1.0.0"  # AnalysisManifest schema version
 
 
@@ -293,7 +293,9 @@ def _estimate_key(chroma_mean: np.ndarray) -> Tuple[Optional[str], float]:
     best_key: Optional[str] = None
 
     for shift in range(12):
-        rolled = np.roll(chroma_norm, shift)
+        # Rotate so the candidate tonic (pitch class `shift`) sits at index 0,
+        # where the profiles hold their tonic weight.
+        rolled = np.roll(chroma_norm, -shift)
 
         corr_major = float(np.corrcoef(rolled, _MAJOR_PROFILE)[0, 1])
         if corr_major > best_corr:

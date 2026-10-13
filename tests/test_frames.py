@@ -493,7 +493,7 @@ def test_extract_and_save(tmp_path: Path) -> None:
 
     # Verify manifest fields
     assert dna.manifest.schema_version == "1.0.0"
-    assert dna.manifest.extractor_version == "2.1.0"
+    assert dna.manifest.extractor_version == "2.2.0"
     assert dna.manifest.feature_set_version == "v2"
     assert len(dna.manifest.config_hash) == 64
 

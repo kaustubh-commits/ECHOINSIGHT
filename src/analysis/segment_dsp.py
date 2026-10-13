@@ -246,7 +246,9 @@ def _estimate_key(chroma_mean: np.ndarray) -> Tuple[str, float]:
     best_key = "unknown"
 
     for shift in range(12):
-        rolled = np.roll(chroma_norm, shift)
+        # Rotate so the candidate tonic (pitch class `shift`) sits at index 0,
+        # where the profiles hold their tonic weight.
+        rolled = np.roll(chroma_norm, -shift)
         corr_major = float(np.corrcoef(rolled, _MAJOR_PROFILE)[0, 1])
         if corr_major > best_corr:
             best_corr = corr_major

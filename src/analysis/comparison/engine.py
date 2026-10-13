@@ -7,7 +7,7 @@ No scoring.  No recommendations.  No interpretation.
 The report exposes four deterministic differences between two songs:
 
 - ``tempo_difference``    — absolute BPM difference
-- ``key_relationship``    — Camelot wheel circular distance (0 = same key)
+- ``key_relationship``    — Camelot wheel circular distance (0 = same key or relative major/minor)
 - ``duration_difference`` — absolute duration difference in seconds
 - ``energy_difference``   — normalised RMS energy difference in [-1.0, 1.0]
 
@@ -148,7 +148,7 @@ def _tempo_difference(a: SongDNA, b: SongDNA) -> float:
 
 
 def _key_relationship(a: SongDNA, b: SongDNA) -> int:
-    """Camelot wheel circular distance (0 = same key)."""
+    """Camelot wheel circular distance (0 = same key or relative major/minor; mode letter ignored)."""
     return _camelot_distance(
         _camelot_number(a.summary.key_estimate),
         _camelot_number(b.summary.key_estimate),
@@ -264,7 +264,7 @@ def format_report(report: ComparisonReport) -> str:
         f"\n{report.song_a_name}  vs  {report.song_b_name}",
         f"\nTempo difference:     {report.tempo_difference:.2f} BPM",
         f"Key relationship:     {report.key_relationship} "
-        "(Camelot wheel distance; 0 = same key)",
+        "(Camelot wheel distance; 0 = same key or relative major/minor)",
         f"Duration difference:  {report.duration_difference:.2f} s",
         f"Energy difference:    {report.energy_difference:+.3f} "
         "[-1.0, 1.0; positive = A more energetic]",
