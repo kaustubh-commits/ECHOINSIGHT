@@ -26,12 +26,49 @@ from PySide6.QtWidgets import (
 from src.analysis.extractor import extract_full_pipeline
 from src.analysis.package_store import PackageStore
 from src.analysis.separator import load_pre_separated
-from src.analysis.spotify_enricher import SpotifyEnricher
+from src.analysis.track_metadata import build_enriched_package
 from src.core.package import EnrichedSongPackage
 from src.ui.widgets.stem_mixer import StemMixer
 from src.ui.widgets.timeline_view import TimelineView
 
 logger = logging.getLogger(__name__)
+
+_SOURCE_LABELS = {
+    "file_tags": "file tags",
+    "spotify": "Spotify",
+    "user": "entered by user",
+    "unknown": "unknown",
+}
+
+
+def describe_track(package: EnrichedSongPackage) -> tuple[str, str, str]:
+    """Return ``(title, artist, tooltip)`` for display, never inventing values.
+
+    A missing title falls back to the file name (shown with its extension so
+    it reads as a file name); a missing artist is shown as unknown.  The
+    tooltip states the source of every field.
+    """
+    filename = Path(package.song_dna.metadata.filename).name
+    info = package.track_info
+
+    title = info.title.value if info and info.title.value else filename
+    artist = info.artist.value if info and info.artist.value else "Unknown artist"
+
+    if info is None:
+        tooltip = f"File: {filename}\nNo track metadata available"
+    else:
+        lines = [f"File: {filename}"]
+        for label, field in (
+            ("Title", info.title),
+            ("Artist", info.artist),
+            ("Album", info.album),
+            ("Release date", info.release_date),
+        ):
+            value = field.value if field.value else "unknown"
+            lines.append(f"{label}: {value} ({_SOURCE_LABELS[field.source]})")
+        tooltip = "\n".join(lines)
+
+    return title, artist, tooltip
 
 
 class DeckView(QGroupBox):
@@ -141,9 +178,9 @@ class DeckView(QGroupBox):
         self.package = package
         dna = package.song_dna
 
-        title = package.spotify.track_name if package.is_enriched and package.spotify else Path(dna.metadata.filename).stem
-        artist = package.spotify.artist_name if package.is_enriched and package.spotify else "Unknown Artist"
+        title, artist, tooltip = describe_track(package)
         self.lbl_title.setText(f"{title} — {artist}")
+        self.lbl_title.setToolTip(tooltip)
 
         bpm = round(dna.summary.tempo_estimate, 1)
         key = dna.summary.key_estimate or "Unknown Key"
@@ -334,8 +371,7 @@ class DeckView(QGroupBox):
                     discovered = load_pre_separated(selected)
                     if discovered is not None:
                         base_pkg = dataclasses.replace(base_pkg, separated_track=discovered)
-                enricher = SpotifyEnricher()
-                enriched = enricher.enrich(base_pkg)
+                enriched = build_enriched_package(base_pkg, selected)
                 self.load_package(enriched, audio_path=selected)
         except Exception as err:
             logger.exception("Error loading track")

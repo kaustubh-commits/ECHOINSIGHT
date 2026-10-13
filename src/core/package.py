@@ -5,6 +5,7 @@ Encapsulates:
 - Domain features & structural segments (SongDNA)
 - Separated stem waveform references (SeparatedTrack)
 - Stem acoustic analysis (StemAnalysisResult)
+- Descriptive track metadata with per-field sources (TrackInfo)
 - External catalog enrichment (SpotifyMetadata)
 """
 
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Optional
 from src.core.song_dna import SongDNA
 from src.core.spotify import SpotifyMetadata
 from src.core.stems import SeparatedTrack
+from src.core.track_info import TrackInfo
 
 if TYPE_CHECKING:
     from src.analysis.stem_analyzer import StemAnalysisResult
@@ -36,13 +38,19 @@ class SongPackage:
 
 @dataclass(frozen=True)
 class EnrichedSongPackage:
-    """Fully analyzed track bundled with optional Spotify catalog metadata."""
+    """Fully analyzed track bundled with descriptive metadata.
+
+    ``track_info`` holds title/artist/album/date with the source of each
+    field.  ``spotify`` is set only when a real catalogue provider returned
+    a match; no provider is implemented yet, so it is normally ``None``.
+    """
     package: SongPackage
     spotify: Optional[SpotifyMetadata] = None
+    track_info: Optional[TrackInfo] = None
 
     @property
     def is_enriched(self) -> bool:
-        """Indicates whether Spotify catalog metadata is attached."""
+        """Indicates whether real catalogue metadata is attached."""
         return self.spotify is not None
 
     @property
