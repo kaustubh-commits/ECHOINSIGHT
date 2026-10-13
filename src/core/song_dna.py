@@ -133,9 +133,11 @@ class SongSummary:
     Attributes
     ----------
     tempo_estimate : float
-        Weighted average of segment tempos in BPM.  Positive value.
-    tempo_confidence : float
-        Confidence of the tempo estimate in 0.0–1.0.
+        Song-level tempo in BPM.  When ``tempo_is_fallback`` is True this
+        is a placeholder, not a measurement.
+    tempo_confidence : Optional[float]
+        Confidence of the tempo estimate in 0.0–1.0, or ``None`` when no
+        confidence was computed (the current extractor computes none).
     key_estimate : Optional[str]
         The most common key across segments, e.g. ``"C major"``,
         ``"A minor"``.  ``None`` when no key could be reliably estimated.
@@ -157,10 +159,13 @@ class SongSummary:
         Mean chroma vector (12 bins) across the entire song.
     tuning_offset : float
         Deviation from A440 in cents.  Positive = sharp, negative = flat.
+    tempo_is_fallback : bool
+        True when no tempo could be detected and ``tempo_estimate`` is the
+        extractor's fixed fallback value.
     """
 
     tempo_estimate: float = 0.0
-    tempo_confidence: float = 0.0
+    tempo_confidence: Optional[float] = None
     key_estimate: Optional[str] = None
     key_confidence: float = 0.0
     key_alternatives: Tuple[Tuple[str, float], ...] = ()
@@ -170,13 +175,14 @@ class SongSummary:
     mfcc_mean: Tuple[float, ...] = ()
     chroma_mean: Tuple[float, ...] = ()
     tuning_offset: float = 0.0
+    tempo_is_fallback: bool = False
 
     def __post_init__(self) -> None:
         if self.tempo_estimate < 0:
             raise ValueError(
                 f"tempo_estimate must be >= 0, got {self.tempo_estimate}"
             )
-        if not 0.0 <= self.tempo_confidence <= 1.0:
+        if self.tempo_confidence is not None and not 0.0 <= self.tempo_confidence <= 1.0:
             raise ValueError(
                 f"tempo_confidence must be in [0, 1], "
                 f"got {self.tempo_confidence}"
@@ -311,6 +317,43 @@ def _reconstruct_dataclass(cls: type, data: dict) -> object:
     return cls(**kwargs)
 
 
+def _migrate_tempo_fields(rhythm_like: dict) -> None:
+    """Migrate one pre-2.2.0 tempo record in place.
+
+    Before ``tempo_is_fallback`` existed, the extractor encoded a fallback
+    tempo as confidence 0.0 and wrote fixed placeholder confidences
+    (1.0 or 0.8) for detected tempos.  None of those numbers was measured,
+    so they become ``None``; confidence 0.0 becomes ``tempo_is_fallback``.
+    """
+    if "tempo_is_fallback" in rhythm_like:
+        return
+    rhythm_like["tempo_is_fallback"] = rhythm_like.get("tempo_confidence") == 0.0
+    rhythm_like["tempo_confidence"] = None
+
+
+def migrate_song_dna_dict(data: dict) -> dict:
+    """Upgrade a serialised SongDNA dict to the current schema (in place).
+
+    Only data written before schema 2.2.0 is changed; current data passes
+    through untouched.  Returns *data* for convenience.
+    """
+    summary = data.get("summary")
+    if isinstance(summary, dict):
+        _migrate_tempo_fields(summary)
+
+    structure = data.get("structure")
+    if isinstance(structure, dict):
+        segment_lists = [structure.get("segments") or []]
+        for alt in structure.get("alternative_segmentations") or []:
+            segment_lists.append(alt.get("segments") or [])
+        for segments in segment_lists:
+            for seg in segments:
+                rhythm = seg.get("dsp", {}).get("rhythm")
+                if isinstance(rhythm, dict):
+                    _migrate_tempo_fields(rhythm)
+    return data
+
+
 # ---------------------------------------------------------------------------
 # SongDNA (aggregate root)
 # ---------------------------------------------------------------------------
@@ -373,7 +416,7 @@ class SongDNA:
     timeline: Optional[Timeline] = None
     frames: Optional[FrameReference] = None
     manifest: Optional[AnalysisManifest] = None
-    schema_version: str = "2.1.0"
+    schema_version: str = "2.2.0"  # 2.2.0: tempo_is_fallback, optional tempo confidence
 
     def __post_init__(self) -> None:
         # Validate that the structure's total_duration matches the
@@ -441,5 +484,5 @@ class SongDNA:
             original (``==``), including nested structures, enums, and
             identifiers.
         """
-        data = json.loads(json_str)
+        data = migrate_song_dna_dict(json.loads(json_str))
         return _reconstruct_dataclass(cls, data)

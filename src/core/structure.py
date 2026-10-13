@@ -124,22 +124,29 @@ class SegmentRhythm:
     ----------
     tempo : float
         Estimated tempo in BPM within this segment.  Positive value.
-    tempo_confidence : float
-        Confidence of the tempo estimate in 0.0–1.0.
+        When ``tempo_is_fallback`` is True this is a placeholder, not a
+        measurement.
+    tempo_confidence : Optional[float]
+        Confidence of the tempo estimate in 0.0–1.0, or ``None`` when no
+        confidence was computed (the current extractor computes none).
     onset_strength_mean : float
         Mean onset strength — a measure of how percussive the segment is.
         Higher values indicate more rhythmic activity (e.g. drums).
         Always >= 0.
+    tempo_is_fallback : bool
+        True when no tempo could be detected and ``tempo`` is the
+        extractor's fixed fallback value.
     """
 
     tempo: float
-    tempo_confidence: float
+    tempo_confidence: Optional[float]
     onset_strength_mean: float
+    tempo_is_fallback: bool = False
 
     def __post_init__(self) -> None:
         if self.tempo <= 0:
             raise ValueError(f"tempo must be positive, got {self.tempo}")
-        if not 0.0 <= self.tempo_confidence <= 1.0:
+        if self.tempo_confidence is not None and not 0.0 <= self.tempo_confidence <= 1.0:
             raise ValueError(
                 f"tempo_confidence must be in [0, 1], "
                 f"got {self.tempo_confidence}"
@@ -472,7 +479,7 @@ class SegmentDNA:
     timing: SegmentTiming
     dsp: SegmentDSP
     context: SegmentContext
-    schema_version: str = "2.0.0"
+    schema_version: str = "2.1.0"  # 2.1.0: SegmentRhythm.tempo_is_fallback, optional confidence
 
     def __post_init__(self) -> None:
         if not self.song_id:

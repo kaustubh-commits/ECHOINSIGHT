@@ -28,6 +28,7 @@ from src.analysis.package_store import PackageStore
 from src.analysis.separator import load_pre_separated
 from src.analysis.track_metadata import build_enriched_package
 from src.core.package import EnrichedSongPackage
+from src.core.song_dna import SongSummary
 from src.ui.widgets.stem_mixer import StemMixer
 from src.ui.widgets.timeline_view import TimelineView
 
@@ -39,6 +40,14 @@ _SOURCE_LABELS = {
     "user": "entered by user",
     "unknown": "unknown",
 }
+
+
+def format_tempo(summary: SongSummary) -> str:
+    """Tempo for display; a fallback value is labelled as such."""
+    bpm = round(summary.tempo_estimate, 1)
+    if summary.tempo_is_fallback:
+        return f"{bpm:g} BPM (fallback, not detected)"
+    return f"{bpm:g} BPM"
 
 
 def describe_track(package: EnrichedSongPackage) -> tuple[str, str, str]:
@@ -182,9 +191,8 @@ class DeckView(QGroupBox):
         self.lbl_title.setText(f"{title} — {artist}")
         self.lbl_title.setToolTip(tooltip)
 
-        bpm = round(dna.summary.tempo_estimate, 1)
         key = dna.summary.key_estimate or "Unknown Key"
-        self.lbl_bpm_key.setText(f"{bpm} BPM  |  {key}")
+        self.lbl_bpm_key.setText(f"{format_tempo(dna.summary)}  |  {key}")
 
         # 1. Resolve Audio File
         resolved_audio: Path | None = None

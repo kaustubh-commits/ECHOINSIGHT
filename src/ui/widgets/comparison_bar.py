@@ -53,11 +53,16 @@ class ComparisonBar(QGroupBox):
             self.lbl_energy.setText("---")
             return
 
-        bpm_a = pkg_a.song_dna.summary.tempo_estimate
-        bpm_b = pkg_b.song_dna.summary.tempo_estimate
-        diff_bpm = bpm_b - bpm_a
-        sign = "+" if diff_bpm > 0 else ""
-        self.lbl_tempo.setText(f"{sign}{diff_bpm:.1f} BPM ({bpm_a:.0f} → {bpm_b:.0f})")
+        sum_a = pkg_a.song_dna.summary
+        sum_b = pkg_b.song_dna.summary
+        if sum_a.tempo_is_fallback or sum_b.tempo_is_fallback:
+            self.lbl_tempo.setText("n/a (tempo not detected)")
+        else:
+            bpm_a = sum_a.tempo_estimate
+            bpm_b = sum_b.tempo_estimate
+            diff_bpm = bpm_b - bpm_a
+            sign = "+" if diff_bpm > 0 else ""
+            self.lbl_tempo.setText(f"{sign}{diff_bpm:.1f} BPM ({bpm_a:.0f} → {bpm_b:.0f})")
 
         key_a = pkg_a.song_dna.summary.key_estimate or "Unknown"
         key_b = pkg_b.song_dna.summary.key_estimate or "Unknown"

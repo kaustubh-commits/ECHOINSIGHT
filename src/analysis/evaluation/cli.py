@@ -57,7 +57,7 @@ def _format_tabular_segments(segments, dsp_list) -> str:
         lines.append(
             f"{i + 1:<10d} {start_s:>10.2f} {end_s:>10.2f} "
             f"{end_s - start_s:>12.2f} "
-            f"{dsp.rhythm.tempo:>12.2f} "
+            f"{('fallback' if dsp.rhythm.tempo_is_fallback else f'{dsp.rhythm.tempo:.2f}'):>12s} "
             f"{str(dsp.harmony.key):>10s}"
         )
     return "\n".join(lines)

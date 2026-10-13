@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 
 from src.analysis.stem_analyzer import StemAnalysisResult
 from src.core.package import EnrichedSongPackage, SongPackage
-from src.core.song_dna import SongDNA, _reconstruct_dataclass
+from src.core.song_dna import SongDNA, _reconstruct_dataclass, migrate_song_dna_dict
 from src.core.spotify import SpotifyMetadata
 from src.core.stems import SeparatedTrack, StemPaths
 from src.core.track_info import TrackInfo
@@ -124,7 +124,7 @@ class PackageStore:
         else:
             raise KeyError("JSON missing 'song_dna' or root 'metadata'/'structure' keys")
 
-        song_dna = _reconstruct_dataclass(SongDNA, dna_dict)
+        song_dna = _reconstruct_dataclass(SongDNA, migrate_song_dna_dict(dna_dict))
 
         separated_track: Optional[SeparatedTrack] = None
         if data.get("separated_track"):
