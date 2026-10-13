@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QToolTip, QWidget
 
 from src.core.package import EnrichedSongPackage
+from src.core.timeline import Timeline
 from src.ui.theme import SEGMENT_COLORS
 
 
@@ -63,6 +64,18 @@ class TimelineView(QWidget):
             if seg.timing.start_time <= time_seconds < seg.timing.end_time:
                 return i
         return None
+
+    @staticmethod
+    def grid_caption(timeline: Timeline | None) -> str:
+        """Caption for the beat strip saying what the grid is based on."""
+        if timeline is None or not timeline.bars:
+            return "no beat grid (no beats detected)"
+        if timeline.downbeats_assumed:
+            return (
+                f"bars assumed {timeline.beats_per_bar}/4 "
+                f"from beats; downbeats not detected"
+            )
+        return ""
 
     @staticmethod
     def _fmt_time(seconds: float) -> str:
@@ -191,9 +204,9 @@ class TimelineView(QWidget):
         painter.setPen(QPen(QColor("#2D3748"), 1))
         painter.drawLine(0, int(grid_y), int(w), int(grid_y))
 
-        # Render beat & bar divisions from the real Timeline when available;
-        # fall back to a synthetic tempo-derived 4/4 grid only when no
-        # Timeline exists (e.g. legacy packages extracted pre-timeline).
+        # Render beat & bar divisions only from a real Timeline.  Without one
+        # (no beats detected, or a legacy package) no grid is drawn: a grid
+        # derived from the tempo alone would look like detected bars.
         timeline = self._package.song_dna.timeline
         if timeline is not None and timeline.bars:
             bar_start_times = {round(bar.start_time, 3) for bar in timeline.bars}
@@ -220,26 +233,16 @@ class TimelineView(QWidget):
                     continue
                 x = (beat / self._duration) * w
                 painter.drawLine(int(x), int(grid_y + 12), int(x), int(h))
-        else:
-            tempo = self._package.song_dna.summary.tempo_estimate
-            if tempo > 0:
-                spb = 60.0 / tempo  # seconds per beat
-                total_beats = int(self._duration / spb)
 
-                painter.setFont(QFont("Segoe UI", 7))
-                for b in range(0, total_beats + 1):
-                    beat_sec = b * spb
-                    x = (beat_sec / self._duration) * w
-                    is_bar = (b % 4 == 0)
-
-                    if is_bar:
-                        bar_num = (b // 4) + 1
-                        painter.setPen(QPen(QColor("#A0AEC0"), 1))
-                        painter.drawLine(int(x), int(grid_y), int(x), int(h))
-                        painter.drawText(QRectF(x + 2, grid_y + 2, 30, 16), Qt.AlignmentFlag.AlignLeft, f"|{bar_num}")
-                    else:
-                        painter.setPen(QPen(QColor("#4A5568"), 1))
-                        painter.drawLine(int(x), int(grid_y + 12), int(x), int(h))
+        caption = self.grid_caption(timeline)
+        if caption:
+            font = QFont("Segoe UI", 7)
+            painter.setFont(font)
+            text_w = QFontMetrics(font).horizontalAdvance(caption) + 10
+            box = QRectF(w - text_w, grid_y + 1, text_w, 21)
+            painter.fillRect(box, QColor("#1A202C"))  # keep it legible over bar labels
+            painter.setPen(QColor("#A0AEC0"))
+            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, caption)
 
         # 5. Playhead
         playhead_x = (self._playhead_sec / self._duration) * w

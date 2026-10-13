@@ -416,7 +416,7 @@ class SongDNA:
     timeline: Optional[Timeline] = None
     frames: Optional[FrameReference] = None
     manifest: Optional[AnalysisManifest] = None
-    schema_version: str = "2.2.0"  # 2.2.0: tempo_is_fallback, optional tempo confidence
+    schema_version: str = "2.2.0"  # 2.2.0: tempo_is_fallback, optional tempo confidence, Timeline.downbeats_assumed
 
     def __post_init__(self) -> None:
         # Validate that the structure's total_duration matches the
