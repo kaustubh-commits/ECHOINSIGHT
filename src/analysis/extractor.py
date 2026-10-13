@@ -537,13 +537,14 @@ def _assemble_song_dna_v2(
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
     """Assemble a complete v2 ``SongDNA`` aggregate."""
-    # Build boundary confidences (one per boundary between segments).
+    # One boundary record per boundary between segments.  Segmentation
+    # computes no confidence, so none is stored.
     boundaries: List[BoundaryConfidence] = []
     for i in range(len(segments) - 1):
         boundaries.append(
             BoundaryConfidence(
                 time=segments[i].timing.end_time,
-                confidence=0.7,
+                confidence=None,
                 method="agglomerative",
             )
         )

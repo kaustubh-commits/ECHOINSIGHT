@@ -503,9 +503,12 @@ class BoundaryConfidence:
     ----------
     time : float
         Boundary time in seconds from song start.
-    confidence : float
-        Confidence in 0.0–1.0.  Low values suggest the boundary may be
-        spurious or the result of noise.
+    confidence : Optional[float]
+        Confidence in 0.0–1.0, or ``None`` when no confidence was computed.
+        The current segmentation computes none, so extracted boundaries
+        store ``None``.  (Before this field became optional the extractor
+        wrote a fixed placeholder of 0.7; see
+        ``song_dna.migrate_song_dna_dict``.)
     method : str
         The algorithm or feature that detected this boundary, e.g.
         ``"novelty_curve"``, ``"chroma_change"``, ``"mfcc_change"``,
@@ -513,13 +516,13 @@ class BoundaryConfidence:
     """
 
     time: float
-    confidence: float
+    confidence: Optional[float] = None
     method: str = "unknown"
 
     def __post_init__(self) -> None:
         if self.time < 0:
             raise ValueError(f"time must be >= 0, got {self.time}")
-        if not 0.0 <= self.confidence <= 1.0:
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
             raise ValueError(
                 f"confidence must be in [0, 1], got {self.confidence}"
             )
@@ -677,7 +680,7 @@ class StructureDNA:
     boundary_confidences: Tuple[BoundaryConfidence, ...] = ()
     alternative_segmentations: Tuple[AlternativeSegmentation, ...] = ()
     ssm_reference: Optional[SSMReference] = None
-    schema_version: str = "2.0.0"
+    schema_version: str = "2.1.0"  # 2.1.0: BoundaryConfidence.confidence optional (None)
     num_segments: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:

@@ -331,11 +331,28 @@ def _migrate_tempo_fields(rhythm_like: dict) -> None:
     rhythm_like["tempo_confidence"] = None
 
 
+_PLACEHOLDER_BOUNDARY = (0.7, "agglomerative")
+"""(confidence, method) the extractor wrote for every boundary before
+boundary confidence became optional.  It was a constant, not a measurement."""
+
+
+def _migrate_boundary_confidences(structure: dict) -> None:
+    """Replace the old placeholder boundary confidence with ``None`` (in place).
+
+    Only the exact pair the extractor used to write, (0.7, "agglomerative"),
+    is cleared; any other value or method is kept as is.
+    """
+    for boundary in structure.get("boundary_confidences") or []:
+        if (boundary.get("confidence"), boundary.get("method")) == _PLACEHOLDER_BOUNDARY:
+            boundary["confidence"] = None
+
+
 def migrate_song_dna_dict(data: dict) -> dict:
     """Upgrade a serialised SongDNA dict to the current schema (in place).
 
-    Only data written before schema 2.2.0 is changed; current data passes
-    through untouched.  Returns *data* for convenience.
+    Only data written by older versions is changed (placeholder tempo
+    confidences, missing fallback flags, placeholder boundary confidences);
+    current data passes through untouched.  Returns *data* for convenience.
     """
     summary = data.get("summary")
     if isinstance(summary, dict):
@@ -343,6 +360,7 @@ def migrate_song_dna_dict(data: dict) -> dict:
 
     structure = data.get("structure")
     if isinstance(structure, dict):
+        _migrate_boundary_confidences(structure)
         segment_lists = [structure.get("segments") or []]
         for alt in structure.get("alternative_segmentations") or []:
             segment_lists.append(alt.get("segments") or [])

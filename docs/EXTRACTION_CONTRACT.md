@@ -28,10 +28,11 @@ Optional future input: 16-bit PCM.
 
 ## 3. Output Schema Version
 
-Current versions (2026-10-13): `SongDNA` **2.2.0**, `SegmentDNA` **2.1.0**, `StructureDNA` **2.0.0**. Each aggregate is versioned separately (ADR-0007).
+Current versions (2026-10-13): `SongDNA` **2.2.0**, `SegmentDNA` **2.1.0**, `StructureDNA` **2.1.0**. Each aggregate is versioned separately (ADR-0007).
 
 - 2.2.0 / 2.1.0 added `tempo_is_fallback`, made `tempo_confidence` optional (no confidence is computed, so it is `None`), and recorded `Timeline.downbeats_assumed` / `beats_per_bar` (bars are assumed 4/4, not detected).
-- Files written before 2.2.0 still load; `migrate_song_dna_dict` converts their placeholder tempo confidences.
+- StructureDNA 2.1.0 made `BoundaryConfidence.confidence` optional; segmentation computes no confidence, so it is `None`.
+- Older files still load; `migrate_song_dna_dict` converts their placeholder tempo confidences and the placeholder boundary confidence (0.7, "agglomerative") to `None`.
 
 ---
 

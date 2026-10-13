@@ -154,7 +154,7 @@ What the app shows today, and how far to trust it.
 - Bars and downbeats: every 4th detected beat is assumed to be a downbeat (4/4). Nothing detects downbeats or other metres. The data records this (`Timeline.downbeats_assumed`), and the timeline says so.
 
 **Not available**
-- Tempo confidence: none is computed, so it is stored as unknown (`None`).
+- Tempo confidence and segment-boundary confidence: none is computed, so both are stored as unknown (`None`).
 - Track metadata comes only from the audio file's own tags; missing fields show as unknown. No Spotify or other catalogue lookup is implemented. A future provider can plug into `CatalogueProvider`, but since late 2024 Spotify's audio-features/audio-analysis endpoints are restricted, so it would supply only basic catalogue data.
 
 **Workspace limitations**

@@ -265,7 +265,7 @@ def test_structure_dna_round_trip() -> None:
     as_json = json.dumps(as_dict)
     restored = json.loads(as_json)
 
-    assert restored["schema_version"] == "2.0.0"
+    assert restored["schema_version"] == "2.1.0"
     assert restored["num_segments"] == 4
     assert restored["total_duration"] == 120.0
     assert len(restored["segments"]) == 4
