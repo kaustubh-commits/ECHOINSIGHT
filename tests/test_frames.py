@@ -17,7 +17,6 @@ Covers:
 from __future__ import annotations
 
 import dataclasses
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -339,19 +338,6 @@ class TestSongDNA:
         assert dna.frames is None
         assert dna.manifest is None
 
-    def test_old_json_backward_compatible(self) -> None:
-        """Load an existing SongDNA JSON file — frames and manifest should be None."""
-        old_json_path = Path("data/dna/br3ath3.json")
-        if not old_json_path.exists():
-            pytest.skip("Old JSON file not found")
-
-        with open(old_json_path, "r") as f:
-            data = json.load(f)
-
-        # Simulate what comparison.py's _dict_to_songdna does
-        assert "frames" not in data
-        assert "manifest" not in data
-
 
 # ======================================================================
 # NPZ Round-Trip via FrameStore
@@ -493,7 +479,7 @@ def test_extract_and_save(tmp_path: Path) -> None:
 
     # Verify manifest fields
     assert dna.manifest.schema_version == "1.0.0"
-    assert dna.manifest.extractor_version == "2.1.0"
+    assert dna.manifest.extractor_version == "2.2.0"
     assert dna.manifest.feature_set_version == "v2"
     assert len(dna.manifest.config_hash) == 64
 

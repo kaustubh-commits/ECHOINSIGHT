@@ -124,22 +124,29 @@ class SegmentRhythm:
     ----------
     tempo : float
         Estimated tempo in BPM within this segment.  Positive value.
-    tempo_confidence : float
-        Confidence of the tempo estimate in 0.0–1.0.
+        When ``tempo_is_fallback`` is True this is a placeholder, not a
+        measurement.
+    tempo_confidence : Optional[float]
+        Confidence of the tempo estimate in 0.0–1.0, or ``None`` when no
+        confidence was computed (the current extractor computes none).
     onset_strength_mean : float
         Mean onset strength — a measure of how percussive the segment is.
         Higher values indicate more rhythmic activity (e.g. drums).
         Always >= 0.
+    tempo_is_fallback : bool
+        True when no tempo could be detected and ``tempo`` is the
+        extractor's fixed fallback value.
     """
 
     tempo: float
-    tempo_confidence: float
+    tempo_confidence: Optional[float]
     onset_strength_mean: float
+    tempo_is_fallback: bool = False
 
     def __post_init__(self) -> None:
         if self.tempo <= 0:
             raise ValueError(f"tempo must be positive, got {self.tempo}")
-        if not 0.0 <= self.tempo_confidence <= 1.0:
+        if self.tempo_confidence is not None and not 0.0 <= self.tempo_confidence <= 1.0:
             raise ValueError(
                 f"tempo_confidence must be in [0, 1], "
                 f"got {self.tempo_confidence}"
@@ -472,7 +479,7 @@ class SegmentDNA:
     timing: SegmentTiming
     dsp: SegmentDSP
     context: SegmentContext
-    schema_version: str = "2.0.0"
+    schema_version: str = "2.1.0"  # 2.1.0: SegmentRhythm.tempo_is_fallback, optional confidence
 
     def __post_init__(self) -> None:
         if not self.song_id:
@@ -496,9 +503,12 @@ class BoundaryConfidence:
     ----------
     time : float
         Boundary time in seconds from song start.
-    confidence : float
-        Confidence in 0.0–1.0.  Low values suggest the boundary may be
-        spurious or the result of noise.
+    confidence : Optional[float]
+        Confidence in 0.0–1.0, or ``None`` when no confidence was computed.
+        The current segmentation computes none, so extracted boundaries
+        store ``None``.  (Before this field became optional the extractor
+        wrote a fixed placeholder of 0.7; see
+        ``song_dna.migrate_song_dna_dict``.)
     method : str
         The algorithm or feature that detected this boundary, e.g.
         ``"novelty_curve"``, ``"chroma_change"``, ``"mfcc_change"``,
@@ -506,13 +516,13 @@ class BoundaryConfidence:
     """
 
     time: float
-    confidence: float
+    confidence: Optional[float] = None
     method: str = "unknown"
 
     def __post_init__(self) -> None:
         if self.time < 0:
             raise ValueError(f"time must be >= 0, got {self.time}")
-        if not 0.0 <= self.confidence <= 1.0:
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
             raise ValueError(
                 f"confidence must be in [0, 1], got {self.confidence}"
             )
@@ -670,7 +680,7 @@ class StructureDNA:
     boundary_confidences: Tuple[BoundaryConfidence, ...] = ()
     alternative_segmentations: Tuple[AlternativeSegmentation, ...] = ()
     ssm_reference: Optional[SSMReference] = None
-    schema_version: str = "2.0.0"
+    schema_version: str = "2.1.0"  # 2.1.0: BoundaryConfidence.confidence optional (None)
     num_segments: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:

@@ -119,7 +119,7 @@ N_MFCC: int = 13          # Number of MFCC coefficients to keep
 HOP_LENGTH: int = 512     # Hop length (samples) for frame-level analysis
 N_FFT: int = 2048         # FFT window size
 FEATURE_SET_VERSION: str = "v2"
-EXTRACTOR_VERSION: str = "2.1.0"
+EXTRACTOR_VERSION: str = "2.2.0"  # 2.2.0: key estimation fixed (keys were mirrored)
 SCHEMA_VERSION: str = "1.0.0"  # AnalysisManifest schema version
 
 
@@ -219,7 +219,11 @@ def _extract_frame_features(y: np.ndarray, sr: int) -> Dict[str, np.ndarray]:
 # ======================================================================
 
 
-def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[float, ...]]:
+FALLBACK_TEMPO: float = 120.0
+"""Placeholder tempo stored when no beats are detected (flagged as fallback)."""
+
+
+def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, bool, Tuple[float, ...]]:
     """Detect beat positions (in seconds) and estimate tempo.
 
     Parameters
@@ -231,12 +235,14 @@ def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[float, ..
 
     Returns
     -------
-    tuple[float, float, tuple[float, ...]]
-        ``(tempo, confidence, beat_times)``.
+    tuple[float, bool, tuple[float, ...]]
+        ``(tempo, is_fallback, beat_times)``.
         ``tempo`` is in BPM, rounded to 2 decimal places.
-        ``confidence`` is the beat tracker's confidence (0.0–1.0).
+        ``is_fallback`` is True when no beats were found and ``tempo`` is
+        ``FALLBACK_TEMPO`` rather than a measurement.
         ``beat_times`` are beat positions in **seconds** from the start
-        of the track.
+        of the track.  The beat tracker provides no confidence score, so
+        none is reported.
     """
     tempo, beat_times = librosa.beat.beat_track(
         y=y, sr=sr, hop_length=HOP_LENGTH, trim=False, units="time"
@@ -244,24 +250,25 @@ def _detect_beats(y: np.ndarray, sr: int) -> Tuple[float, float, Tuple[float, ..
     raw_tempo = float(np.round(np.asarray(tempo).flatten()[0], 2))
 
     if not np.asarray(beat_times).size or raw_tempo <= 0.0:
-        # Fallback for static tones, pure noise, or zero-energy audio:
-        # report a neutral 120 BPM grid but mark the estimate as untrusted.
-        final_tempo = 120.0
-        confidence = 0.0
+        # Static tones, pure noise, or zero-energy audio: no tempo exists.
+        # Store a placeholder so downstream types stay valid, and flag it.
+        final_tempo = FALLBACK_TEMPO
+        is_fallback = True
         beat_times_tuple: Tuple[float, ...] = ()
     else:
         final_tempo = raw_tempo
-        confidence = 1.0
+        is_fallback = False
         beat_times_tuple = tuple(
             float(b) for b in np.asarray(beat_times).flatten()
         )
 
     logger.debug(
-        "Tempo: %.2f BPM, %d beats detected",
+        "Tempo: %.2f BPM (fallback=%s), %d beats detected",
         final_tempo,
+        is_fallback,
         len(beat_times_tuple),
     )
-    return final_tempo, confidence, beat_times_tuple
+    return final_tempo, is_fallback, beat_times_tuple
 
 
 # ======================================================================
@@ -293,7 +300,9 @@ def _estimate_key(chroma_mean: np.ndarray) -> Tuple[Optional[str], float]:
     best_key: Optional[str] = None
 
     for shift in range(12):
-        rolled = np.roll(chroma_norm, shift)
+        # Rotate so the candidate tonic (pitch class `shift`) sits at index 0,
+        # where the profiles hold their tonic weight.
+        rolled = np.roll(chroma_norm, -shift)
 
         corr_major = float(np.corrcoef(rolled, _MAJOR_PROFILE)[0, 1])
         if corr_major > best_corr:
@@ -431,14 +440,14 @@ def _build_manifest(sample_rate: int, hop_length: int) -> AnalysisManifest:
 
 def _build_song_summary(
     tempo: float,
-    tempo_confidence: float,
+    tempo_is_fallback: bool,
     timbre: Dict[str, float],
     tonal: Dict[str, object],
 ) -> SongSummary:
     """Build a v2 ``SongSummary`` from global statistics."""
     return SongSummary(
         tempo_estimate=tempo,
-        tempo_confidence=tempo_confidence,
+        tempo_is_fallback=tempo_is_fallback,
         key_estimate=tonal.get("key"),  # type: ignore[arg-type]
         key_confidence=float(tonal.get("key_confidence", 0.0)),
         rms_energy_mean=timbre["rms_energy_mean"],
@@ -454,7 +463,7 @@ def _build_single_segment(
     song_id: SongID,
     duration: float,
     tempo: float,
-    tempo_confidence: float,
+    tempo_is_fallback: bool,
     timbre: Dict[str, float],
     tonal: Dict[str, object],
     onset_mean: float,
@@ -469,8 +478,9 @@ def _build_single_segment(
 
     rhythm = SegmentRhythm(
         tempo=tempo,
-        tempo_confidence=tempo_confidence,
+        tempo_confidence=None,
         onset_strength_mean=onset_mean,
+        tempo_is_fallback=tempo_is_fallback,
     )
 
     chroma_mean = list(tonal.get("chroma_mean", []))
@@ -527,13 +537,14 @@ def _assemble_song_dna_v2(
     manifest: Optional[AnalysisManifest] = None,
 ) -> SongDNA:
     """Assemble a complete v2 ``SongDNA`` aggregate."""
-    # Build boundary confidences (one per boundary between segments).
+    # One boundary record per boundary between segments.  Segmentation
+    # computes no confidence, so none is stored.
     boundaries: List[BoundaryConfidence] = []
     for i in range(len(segments) - 1):
         boundaries.append(
             BoundaryConfidence(
                 time=segments[i].timing.end_time,
-                confidence=0.7,
+                confidence=None,
                 method="agglomerative",
             )
         )
@@ -559,7 +570,6 @@ def _assemble_song_dna_v2(
         timeline=timeline,
         frames=frames,
         manifest=manifest,
-        schema_version="2.1.0",
     )
 
 
@@ -570,7 +580,7 @@ def _assemble_v1_adapter(
     y: np.ndarray,
     features: Dict[str, np.ndarray],
     tempo: float,
-    tempo_confidence: float,
+    tempo_is_fallback: bool,
     beat_times: Optional[Tuple[float, ...]] = None,
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
@@ -590,13 +600,13 @@ def _assemble_v1_adapter(
         song_id=song_id,
         duration=duration,
         tempo=tempo,
-        tempo_confidence=tempo_confidence,
+        tempo_is_fallback=tempo_is_fallback,
         timbre=timbre,
         tonal=tonal,
         onset_mean=onset_mean,
     )
 
-    summary = _build_song_summary(tempo, tempo_confidence, timbre, tonal)
+    summary = _build_song_summary(tempo, tempo_is_fallback, timbre, tonal)
 
     timeline = None
     if beat_times:
@@ -622,7 +632,7 @@ def _assemble_v2_full(
     features: Dict[str, np.ndarray],
     y: np.ndarray,
     tempo: float,
-    tempo_confidence: float,
+    tempo_is_fallback: bool,
     beat_times: Optional[Tuple[float, ...]] = None,
     frames: Optional[FrameReference] = None,
     manifest: Optional[AnalysisManifest] = None,
@@ -664,7 +674,7 @@ def _assemble_v2_full(
 
     # SongSummary from global statistics
     timbre, tonal = _compute_global_statistics(features, y, sr)
-    summary = _build_song_summary(tempo, tempo_confidence, timbre, tonal)
+    summary = _build_song_summary(tempo, tempo_is_fallback, timbre, tonal)
 
     timeline = None
     if beat_times:
@@ -719,7 +729,7 @@ def extract_song_dna(file_path: str) -> SongDNA:
     features = _extract_frame_features(y, sr)
 
     # Stage 3 — Beats
-    tempo, confidence, beat_times = _detect_beats(y, sr)
+    tempo, is_fallback, beat_times = _detect_beats(y, sr)
 
     # Stage 4 — Global statistics
     duration = float(librosa.get_duration(y=y, sr=sr))
@@ -736,7 +746,7 @@ def extract_song_dna(file_path: str) -> SongDNA:
             features=features,
             y=y,
             tempo=tempo,
-            tempo_confidence=confidence,
+            tempo_is_fallback=is_fallback,
             beat_times=beat_times_tuple,
             frames=None,
             manifest=None,
@@ -749,7 +759,7 @@ def extract_song_dna(file_path: str) -> SongDNA:
         y=y,
         features=features,
         tempo=tempo,
-        tempo_confidence=confidence,
+        tempo_is_fallback=is_fallback,
         beat_times=beat_times_tuple,
         frames=None,
         manifest=None,
@@ -787,7 +797,7 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
     features = _extract_frame_features(y, sr)
 
     # Stage 3 — Beats
-    tempo, confidence, beat_times = _detect_beats(y, sr)
+    tempo, is_fallback, beat_times = _detect_beats(y, sr)
 
     # Stage 4 — Global statistics
     duration = float(librosa.get_duration(y=y, sr=sr))
@@ -823,7 +833,7 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
             features=features,
             y=y,
             tempo=tempo,
-            tempo_confidence=confidence,
+            tempo_is_fallback=is_fallback,
             beat_times=beat_times_tuple,
             frames=frame_ref,
             manifest=manifest,
@@ -836,7 +846,7 @@ def extract_and_save(file_path: str, data_root: Path) -> SongDNA:
         y=y,
         features=features,
         tempo=tempo,
-        tempo_confidence=confidence,
+        tempo_is_fallback=is_fallback,
         beat_times=beat_times_tuple,
         frames=frame_ref,
         manifest=manifest,

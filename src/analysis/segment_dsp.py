@@ -49,6 +49,7 @@ HOP_LENGTH: int = 512
 N_MFCC: int = 13
 N_FFT: int = 2048
 SAMPLE_RATE: int = 22050
+FALLBACK_TEMPO: float = 120.0  # placeholder when no tempo is detected (flagged)
 
 _MAJOR_PROFILE: np.ndarray = np.array(
     [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
@@ -195,24 +196,20 @@ def _segment_rhythm(
         raise ValueError(f"segment duration must be positive, got {dur}")
 
     # Local tempo via dynamic programming beat tracker on the segment slice
+    # Same rule as the song level: a tempo counts as detected only when the
+    # tracker finds beats and a positive tempo; otherwise store the fixed
+    # fallback and flag it.  No confidence is computed.
     seg_y = y[int(start_s * sr): int(end_s * sr)]
-    if seg_y.size < sr // 4:  # less than 250ms — not enough to estimate
-        tempo = 120.0
-        confidence = 0.0
-    else:
-        local_tempo, _local_beats = librosa.beat.beat_track(
+    tempo = FALLBACK_TEMPO
+    is_fallback = True
+    if seg_y.size >= sr // 4:  # at least 250ms of audio
+        local_tempo, local_beats = librosa.beat.beat_track(
             y=seg_y, sr=sr, hop_length=HOP_LENGTH
         )
         local_tempo_val = float(np.asarray(local_tempo).flatten()[0])
-        if local_tempo_val > 0.0:
+        if local_tempo_val > 0.0 and np.asarray(local_beats).size > 0:
             tempo = float(np.round(local_tempo_val, 2))
-        else:
-            tempo = 120.0
-        # Confidence heuristic: how much of the segment falls on a beat
-        # grid regular enough to support the tempo estimate. We use the
-        # fractional part of expected beat positions vs. onset energy
-        # autocorrelation, simplified: 0.5–1.0 with default 0.8.
-        confidence = 0.8
+            is_fallback = False
 
     # Onset strength mean/std within the segment
     start_f = int(round(start_s * sr / HOP_LENGTH))
@@ -220,12 +217,10 @@ def _segment_rhythm(
     seg_onset = onset_env[max(0, start_f): max(start_f + 1, end_f)]
     onset_mean = float(np.mean(seg_onset)) if seg_onset.size > 0 else 0.0
 
-    if confidence < 0.0 or confidence > 1.0:
-        confidence = float(np.clip(confidence, 0.0, 1.0))
-
     return SegmentRhythm(
         tempo=tempo,
-        tempo_confidence=confidence,
+        tempo_confidence=None,
+        tempo_is_fallback=is_fallback,
         onset_strength_mean=onset_mean,
     )
 
@@ -246,7 +241,9 @@ def _estimate_key(chroma_mean: np.ndarray) -> Tuple[str, float]:
     best_key = "unknown"
 
     for shift in range(12):
-        rolled = np.roll(chroma_norm, shift)
+        # Rotate so the candidate tonic (pitch class `shift`) sits at index 0,
+        # where the profiles hold their tonic weight.
+        rolled = np.roll(chroma_norm, -shift)
         corr_major = float(np.corrcoef(rolled, _MAJOR_PROFILE)[0, 1])
         if corr_major > best_corr:
             best_corr = corr_major

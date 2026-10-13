@@ -76,6 +76,13 @@ class Timeline:
     bars : Tuple[Bar, ...]
         Contiguous bar spans covering the timeline.  Bar numbers start
         at 1.
+    downbeats_assumed : bool
+        True when ``downbeats`` were not detected but assumed: every
+        ``beats_per_bar``-th beat, counting from the first detected beat.
+        Bars inherit this assumption.  No downbeat detector exists yet, so
+        every timeline built today is assumed.
+    beats_per_bar : int
+        Beats per bar used when downbeats are assumed (4 = assumed 4/4).
     num_bars : int
         Number of bars (convenience, derived from ``len(bars)``).
         Computed automatically — do not pass in constructor.
@@ -84,9 +91,15 @@ class Timeline:
     beats: Tuple[float, ...]
     downbeats: Tuple[float, ...]
     bars: Tuple[Bar, ...]
+    downbeats_assumed: bool = True
+    beats_per_bar: int = 4
     num_bars: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
+        if self.beats_per_bar < 1:
+            raise ValueError(
+                f"beats_per_bar must be >= 1, got {self.beats_per_bar}"
+            )
         self._validate_beats()
         self._validate_downbeats()
         self._validate_bars()
@@ -296,4 +309,6 @@ class Timeline:
             beats=beat_times,
             downbeats=downbeats,
             bars=tuple(bars),
+            downbeats_assumed=True,
+            beats_per_bar=beats_per_bar,
         )

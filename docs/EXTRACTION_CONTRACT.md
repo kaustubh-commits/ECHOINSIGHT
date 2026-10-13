@@ -28,7 +28,11 @@ Optional future input: 16-bit PCM.
 
 ## 3. Output Schema Version
 
-`"2.0.0"` — enforced by `SongDNA.schema_version`, `StructureDNA.schema_version`, and `SegmentDNA.schema_version`.
+Current versions (2026-10-13): `SongDNA` **2.2.0**, `SegmentDNA` **2.1.0**, `StructureDNA` **2.1.0**. Each aggregate is versioned separately (ADR-0007).
+
+- 2.2.0 / 2.1.0 added `tempo_is_fallback`, made `tempo_confidence` optional (no confidence is computed, so it is `None`), and recorded `Timeline.downbeats_assumed` / `beats_per_bar` (bars are assumed 4/4, not detected).
+- StructureDNA 2.1.0 made `BoundaryConfidence.confidence` optional; segmentation computes no confidence, so it is `None`.
+- Older files still load; `migrate_song_dna_dict` converts their placeholder tempo confidences and the placeholder boundary confidence (0.7, "agglomerative") to `None`.
 
 ---
 
@@ -75,6 +79,8 @@ The same input audio file must produce the exact same `SongDNA` output on every 
 - Deterministic DSP (librosa with fixed parameters, no RNG-dependent stages).
 - Identical hop length / FFT configuration across runs.
 - Provenance recorded so config drift is detectable via `config_hash`.
+
+**Known deviation (not yet fixed):** `song_id` is a random UUID (`generate_song_id`) and `manifest.created_at` is the run time, so two runs on the same file differ in those fields. All measured values (tempo, key, segments, DSP) are deterministic.
 
 ---
 

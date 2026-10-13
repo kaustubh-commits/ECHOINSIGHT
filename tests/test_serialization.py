@@ -238,7 +238,7 @@ def test_segment_dna_round_trip() -> None:
     as_json = json.dumps(as_dict)
     restored = json.loads(as_json)
 
-    assert restored["schema_version"] == "2.0.0"
+    assert restored["schema_version"] == "2.1.0"
     assert restored["song_id"] == song_id
     assert restored["timing"]["start_time"] == 0.0
     assert restored["timing"]["end_time"] == 30.0
@@ -265,7 +265,7 @@ def test_structure_dna_round_trip() -> None:
     as_json = json.dumps(as_dict)
     restored = json.loads(as_json)
 
-    assert restored["schema_version"] == "2.0.0"
+    assert restored["schema_version"] == "2.1.0"
     assert restored["num_segments"] == 4
     assert restored["total_duration"] == 120.0
     assert len(restored["segments"]) == 4
@@ -294,7 +294,7 @@ def test_song_dna_round_trip() -> None:
     restored = json.loads(as_json)
 
     # Top-level
-    assert restored["schema_version"] == "2.1.0"
+    assert restored["schema_version"] == "2.2.0"
     assert restored["metadata"]["song_id"] == song_id
     assert restored["metadata"]["duration"] == 120.0
     assert restored["summary"]["tempo_estimate"] == 120.0

@@ -11,14 +11,38 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.analysis.stem_analyzer import StemAnalysisResult
 from src.core.package import EnrichedSongPackage, SongPackage
-from src.core.song_dna import SongDNA, _reconstruct_dataclass
+from src.core.song_dna import SongDNA, _reconstruct_dataclass, migrate_song_dna_dict
 from src.core.spotify import SpotifyMetadata
 from src.core.stems import SeparatedTrack, StemPaths
+from src.core.track_info import TrackInfo
+
+logger = logging.getLogger(__name__)
+
+PACKAGE_SCHEMA_VERSION = "2.2.0"
+"""2.2.0 adds ``track_info``.  Older files load unchanged (no track_info)."""
+
+
+def _is_fabricated_spotify_stub(sm: Dict[str, Any]) -> bool:
+    """True for placeholder records written by the removed SpotifyEnricher stub.
+
+    That stub never called Spotify.  Its filename search returned
+    ``track_id="offline_id"``; its ID lookup echoed whatever ID it was given
+    (``mock_…`` in tests) with hard-coded metadata whose album art URL
+    pointed at ``images.example.com``.  Real Spotify records have none of these.
+    """
+    track_id = str(sm.get("track_id", ""))
+    art_url = str(sm.get("album_art_url") or "")
+    return (
+        track_id == "offline_id"
+        or track_id.startswith("mock_")
+        or "images.example.com" in art_url
+    )
 
 
 class PackageStore:
@@ -31,12 +55,17 @@ class PackageStore:
         spotify_meta = package.spotify if isinstance(package, EnrichedSongPackage) else None
 
         data: Dict[str, Any] = {
-            "schema_version": "2.1.0",
+            "schema_version": PACKAGE_SCHEMA_VERSION,
             "song_dna": dataclasses.asdict(base_pkg.song_dna),
             "separated_track": None,
             "stem_analysis": None,
             "spotify_metadata": None,
+            "track_info": None,
         }
+
+        track_info = package.track_info if isinstance(package, EnrichedSongPackage) else None
+        if track_info is not None:
+            data["track_info"] = dataclasses.asdict(track_info)
 
         if base_pkg.separated_track:
             st = base_pkg.separated_track
@@ -95,7 +124,7 @@ class PackageStore:
         else:
             raise KeyError("JSON missing 'song_dna' or root 'metadata'/'structure' keys")
 
-        song_dna = _reconstruct_dataclass(SongDNA, dna_dict)
+        song_dna = _reconstruct_dataclass(SongDNA, migrate_song_dna_dict(dna_dict))
 
         separated_track: Optional[SeparatedTrack] = None
         if data.get("separated_track"):
@@ -135,8 +164,15 @@ class PackageStore:
         )
 
         spotify_meta: Optional[SpotifyMetadata] = None
-        if data.get("spotify_metadata"):
-            sm = data["spotify_metadata"]
+        sm_data = data.get("spotify_metadata")
+        if sm_data and _is_fabricated_spotify_stub(sm_data):
+            logger.info(
+                "Dropping placeholder Spotify metadata (track_id=%r) written "
+                "by the old enricher stub; it was never real.",
+                sm_data.get("track_id"),
+            )
+        elif sm_data:
+            sm = sm_data
             spotify_meta = SpotifyMetadata(
                 track_id=sm["track_id"],
                 track_name=sm["track_name"],
@@ -149,9 +185,14 @@ class PackageStore:
                 popularity=sm.get("popularity"),
             )
 
+        track_info: Optional[TrackInfo] = None
+        if data.get("track_info"):
+            track_info = _reconstruct_dataclass(TrackInfo, data["track_info"])  # type: ignore[assignment]
+
         return EnrichedSongPackage(
             package=base_pkg,
             spotify=spotify_meta,
+            track_info=track_info,
         )
 
     @classmethod
