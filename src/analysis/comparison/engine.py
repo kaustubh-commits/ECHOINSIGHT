@@ -6,7 +6,8 @@ No scoring.  No recommendations.  No interpretation.
 
 The report exposes four deterministic differences between two songs:
 
-- ``tempo_difference``    — absolute BPM difference
+- ``tempo_difference``    — absolute BPM difference (None if either tempo
+  is a fallback, i.e. not detected)
 - ``key_relationship``    — Camelot wheel circular distance (0 = same key or relative major/minor)
 - ``duration_difference`` — absolute duration difference in seconds
 - ``energy_difference``   — normalised RMS energy difference in [-1.0, 1.0]
@@ -99,13 +100,13 @@ class ComparisonReport:
 
     song_a_name: str
     song_b_name: str
-    tempo_difference: float
+    tempo_difference: Optional[float]
     key_relationship: int
     duration_difference: float
     energy_difference: float
 
     def __post_init__(self) -> None:
-        if self.tempo_difference < 0:
+        if self.tempo_difference is not None and self.tempo_difference < 0:
             raise ValueError(
                 f"tempo_difference must be >= 0, "
                 f"got {self.tempo_difference}"
@@ -142,8 +143,10 @@ def _display_name(dna: SongDNA) -> str:
     return "Unknown"
 
 
-def _tempo_difference(a: SongDNA, b: SongDNA) -> float:
-    """Absolute BPM difference between the two DSP tempo estimates."""
+def _tempo_difference(a: SongDNA, b: SongDNA) -> Optional[float]:
+    """Absolute BPM difference, or None when either tempo was not detected."""
+    if a.summary.tempo_is_fallback or b.summary.tempo_is_fallback:
+        return None
     return abs(a.summary.tempo_estimate - b.summary.tempo_estimate)
 
 
@@ -262,12 +265,17 @@ def format_report(report: ComparisonReport) -> str:
         "EchoInsight — Raw Metric Comparison Report",
         sep,
         f"\n{report.song_a_name}  vs  {report.song_b_name}",
-        f"\nTempo difference:     {report.tempo_difference:.2f} BPM",
+        "\nTempo difference:     "
+        + (
+            f"{report.tempo_difference:.2f} BPM"
+            if report.tempo_difference is not None
+            else "n/a (tempo not detected)"
+        ),
         f"Key relationship:     {report.key_relationship} "
         "(Camelot wheel distance; 0 = same key or relative major/minor)",
         f"Duration difference:  {report.duration_difference:.2f} s",
         f"Energy difference:    {report.energy_difference:+.3f} "
-        "[-1.0, 1.0; positive = A more energetic]",
+        "[-1.0, 1.0; positive = A has higher mean RMS; not a compatibility score]",
         "",
         "Raw metrics only — no scoring, no recommendation.",
         sep,
