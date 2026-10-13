@@ -4,17 +4,15 @@
 
 ---
 
-## Current State
+## Current State (checked 2026-10-13)
 
-The extraction pipeline in `src/analysis/extractor.py` currently supports both branches behind the developer-only `_BUILD_V2` flag:
+`_BUILD_V2` is **`True`** in `src/analysis/extractor.py`, so every extraction runs the v2 branch: structural segmentation (`segmentation.py`) and per-segment DSP (`segment_dsp.py`). The v1 branch (`_BUILD_V2 = False`), which builds a single global segment, is still in the file but is not used.
 
 ```python
-# MIGRATION: This flag determines which extraction pipeline to use.
-_BUILD_V2 = False  # ← Set to True when ready to test v2 pipeline
+_BUILD_V2 = True  # ← v2 pipeline enabled by default
 ```
 
-- `_BUILD_V2 = False` — the v1 branch constructs a v2-compatible `SongDNA` (single global segment covering the whole track) from the legacy `dna_schema.py` features. This keeps every consumer on the v2 type without a type duality.
-- `_BUILD_V2 = True` — the v2 branch constructs a full v2 `SongDNA` with structural segmentation (`segmentation.py`) and per-segment DSP (`segment_dsp.py`).
+The v1 sample files in `data/dna/` and the v1-only `explorer.py` / `visualization.py` tools were removed on 2026-10-13. They are archived outside the repo and remain in git history.
 
 ---
 
@@ -22,11 +20,11 @@ _BUILD_V2 = False  # ← Set to True when ready to test v2 pipeline
 
 The temporary extraction compatibility path (`_BUILD_V2` flag, the v1 branch, and `src/core/dna_schema.py`) will be removed when **all** of the following are true:
 
-- [ ] Workspace consumes SongDNA v2
-- [ ] Visualization consumes SongDNA v2
-- [ ] Comparison consumes SongDNA v2
-- [ ] All extraction tests pass using v2
-- [ ] No production code imports `dna_schema.py`
+- [x] Workspace consumes SongDNA v2
+- [x] Visualization consumes SongDNA v2: n/a, the v1-only `visualization.py` was removed
+- [x] Comparison consumes SongDNA v2 (`src/analysis/comparison/engine.py`)
+- [ ] All extraction tests pass using v2: they pass, but the two audio-fixture tests in `tests/test_extraction_v2.py` are skipped because `tests/fixtures/` has no audio
+- [x] No production code imports `dna_schema.py` (only `tests/test_config.py` and `tests/test_frames.py` still do)
 
 ---
 

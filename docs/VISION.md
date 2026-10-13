@@ -57,9 +57,11 @@ The following technologies are strong candidates, but none are finalized. We wil
 
 Spotify metadata is **optional, not required**.
 
-1. **If a Spotify URI is provided**:
-   - **Display**: Show album art, official BPM/Key, and genre tags in the Creative Workspace UI.
-   - **Cross-check**: Compare Librosa's estimated BPM/Key against Spotify's official values. Flag discrepancies in the UI with a confidence indicator.
+> **Status (2026-10-13):** No Spotify integration exists. Track metadata comes from the audio file's own tags, and each field records its source (`file_tags`, `spotify`, `user`, `unknown`). A future provider can plug into `CatalogueProvider` (`src/analysis/track_metadata.py`). Spotify restricted its audio-features and audio-analysis Web API endpoints in late 2024, so the BPM/Key cross-check below is not possible through that API; a provider should expect only basic catalogue metadata (title, artist, album, release date, IDs).
+
+1. **If a Spotify URI is provided** (planned):
+   - **Display**: Show album art and catalogue details in the Creative Workspace UI.
+   - **Cross-check**: Compare Librosa's estimated BPM/Key against official values, *if a source for them becomes available* (see the status note above). Flag discrepancies in the UI with a confidence indicator.
    - **Context (Experimental)**: Genre tags may be used for *future* algorithm tuning, but they will **not** influence Section Compatibility in v1.0.
 
 2. **If no URI is provided**:

@@ -6,20 +6,22 @@ EchoInsight is a music intelligence platform that transforms audio into structur
 
 The long-term goal is to build an explainable system capable of analyzing, comparing, visualizing, and eventually generating music using deterministic DSP techniques combined with machine learning.
 
-Current focus is **backend engineering**, not UI.
+Current focus: making every displayed value honest (measured, heuristic, assumed or unknown), then the workspace's audio engine.
 
 ---
 
 # Current Version
 
-Version: v0.1 (Domain Foundation)
+Version: v0.2 (Extraction Pipeline + Workspace prototype). Status updated 2026-10-13.
 
 Status:
-- Domain model complete
-- Configuration system complete
-- Application bootstrap complete
+- Domain model complete (SongDNA schema 2.2.0)
+- Extraction pipeline implemented: tempo/beats, key, timbre, structural segments, per-segment DSP
+- Desktop workspace prototype (`python run_workspace.py`): two decks, segment timeline, pre-separated 4-stem mixer, raw comparison bar
+- Track metadata from file tags only; no Spotify lookup
 - Tests passing
-- Extraction pipeline not yet implemented
+
+Known limitations: see "Current State and Known Limitations" in README.md.
 
 ---
 
@@ -83,39 +85,15 @@ Every analysis ultimately produces a SongDNA object.
 
 Completed
 
-- Domain layer
-- Configuration
-- Bootstrap
-- Tests
+- Domain layer, configuration, bootstrap
+- Deterministic extraction: audio → librosa → frame features → beats/timeline → segmentation → per-segment DSP → SongDNA → JSON
+- Workspace prototype with pre-separated stems
 
 Next
 
-Implement deterministic extraction:
-
-Audio
-↓
-
-Librosa
-
-↓
-
-Frame Analysis
-
-↓
-
-Segmentation
-
-↓
-
-Feature Extraction
-
-↓
-
-SongDNA
-
-↓
-
-JSON
+- Background analysis (the UI currently freezes during extraction)
+- Synchronised audio engine for the decks
+- Downbeat detection (bars are currently assumed 4/4)
 
 ---
 

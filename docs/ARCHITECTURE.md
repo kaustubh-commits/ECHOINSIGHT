@@ -263,55 +263,33 @@ The analysis layer contains modules for extraction, comparison (song-level and s
 
 ## 7. Data Flow
 
-### Current pipeline (v1 schema — to be migrated)
+### Current pipeline (v2 schema, checked 2026-10-13)
 
 ```
 Audio File (MP3/WAV/FLAC/OGG/M4A)
     │
     ▼
-extractor.py — librosa DSP pipeline (v1)
+extractor.py: load at 22,050 Hz (locked) → frame features (librosa)
+    │
+    ├──→ beat tracking → Timeline (beats; bars ASSUMED 4/4, not detected)
+    │      no beats → tempo 120 flagged tempo_is_fallback, no Timeline
+    ├──→ structural segmentation (segmentation.py; segments labelled UNKNOWN)
+    └──→ per-segment DSP (segment_dsp.py)
     │
     ▼
-SongDNA (v1 schema — dna_schema.py)
-    │  Summary statistics + beat grid
-    │  Frame-level data stored as NPZ
+SongDNA aggregate (schema 2.2.0: song_dna.py + structure.py + timeline.py)
+    │  optional: frame arrays saved as NPZ (extract_and_save)
     ▼
-dataclasses.asdict() + json.dumps()
-    │
+SongPackage (+ optional pre-separated stems) → EnrichedSongPackage
+    │  (+ TrackInfo from file tags; no catalogue lookup)
     ▼
-SongDNA JSON (data/dna/*.json)
+PackageStore JSON (package schema 2.2.0)
     │
-    ├──→ comparison engine (v1)
-    ├──→ validation diagnostics
-    ├──→ dataset exploration
-    └──→ plot generation
+    ├──→ comparison engine (comparison/engine.py: raw differences only)
+    └──→ Workspace UI (src/ui/: decks, timeline, stem mixer, comparison bar)
 ```
 
-### Target pipeline (v2 schema — Extraction Pipeline v2)
-
-Once the extraction migration is complete (the current priority), the flow will include structural segmentation and per-segment DSP summaries:
-
-```
-Audio File
-    │
-    ▼
-Frame extraction (librosa)
-    │
-    ▼
-Structural segmentation (segmentation.py)
-    │
-    ▼
-Per-segment DSP computation (segment_dsp.py)
-    │
-    ▼
-SongDNA aggregate (v2 — song_dna.py + structure.py)
-    │
-    ├──→ segment-level comparison (via comparison/contracts.py)
-    ├──→ Creative Workspace (section highlighting, beat-sync)
-    └──→ Creative Intelligence (compatibility suggestions)
-```
-
-Downstream consumers never access raw audio directly. Every stage consumes structured data from the SongDNA representation.
+Analysis consumers (the comparison engine) never access raw audio. The workspace reads the audio file only for playback and the waveform display. `comparison/contracts.py` (segment-level comparison results) is defined but not yet used.
 
 ### Application bootstrap flow
 
@@ -410,6 +388,7 @@ The Architecture Decision Records (ADRs) in `docs/adr/` remain the authoritative
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 0.2.1 | 2026-10-13 | Section 7 now describes the current v2 pipeline (the v1 pipeline is no longer used), including assumed bars, fallback tempo, file-tag metadata and the workspace. |
 | 0.2.0 | 2026-07-26 | Four Pillars product vision adopted (Understanding, Separation, Workspace, Intelligence). VISION.md created. README restructured. Removed outdated "Recommendation Engine" and "Embeddings" roadmap references as frozen commitments. |
 | 0.1.1 | 2026-07-22 | Updated domain model to v2; added SegmentDSP, segment identity, schema versioning; removed v1 references; added optimisation target. |
 | 0.1.0 | 2026-07-12 | Initial architecture — four-tier layering, config, context, bootstrap. |

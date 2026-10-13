@@ -27,18 +27,18 @@ graph LR
 
 ```mermaid
 flowchart TD
-    A[Your Music<br>MP3 / Spotify URI] --> B(Pillar 1: Music Understanding)
+    A[Your Music<br>MP3 / WAV / FLAC] --> B(Pillar 1: Music Understanding)
     
     subgraph Pillar1 [Pillar 1: Music Understanding]
         B --> B1[Librosa DSP<br>BPM, Key, Chroma, Sections]
-        B --> B2[Spotify Enrichment<br>Album Art, Tags, Official BPM]
+        B --> B2[File Tags<br>Title, Artist, Album]
         B1 --> C[SongDNA<br>Structured Intelligence]
         B2 --> C
     end
 
     C --> D(Pillar 2: Music Separation)
     subgraph Pillar2 [Pillar 2: Music Separation]
-        D --> D1[Fine-tuned Demucs<br>Vocals, Drums, Bass, Other]
+        D --> D1[Demucs htdemucs<br>Vocals, Drums, Bass, Other]
         D1 --> E[Stem References<br>Lazy-loaded audio files]
     end
 
@@ -66,9 +66,9 @@ flowchart TD
 
 | Pillar | What it does | Why it matters | Status |
 | :--- | :--- | :--- | :--- |
-| **1. Music Understanding** | Extracts rhythm, harmony, structure, and timbre using **Librosa**. Enriches with optional **Spotify metadata** (album art, official BPM, genre). | Turns a raw audio file into a structured, explainable **SongDNA**—the engine that powers everything else. | ✅ Implemented (v0.1–v0.2) |
-| **2. Music Separation** | Isolates Vocals, Drums, Bass, and Other instruments using a **fine-tuned Demucs** model. Includes dataset curation and academic training pipelines. | Gives you the building blocks for creative mixing. You don't just hear the song—you see its ingredients. | 🔬 Research (Dataset fine-tuning) |
-| **3. Creative Workspace** | A local, real-time two-deck mixer. Side-by-side waveforms, stem-level faders, beat-synced playback, loop selection, and effects (reverb/echo). | This is the "choir instructor" experience. You conduct the arrangement visually and audibly. | 🚧 In Development (Prototyping UI) |
+| **1. Music Understanding** | Extracts tempo, beats, key, timbre and structural segments using **Librosa**. Reads title/artist/album from the file's own tags. | Turns a raw audio file into a structured, explainable **SongDNA**—the engine that powers everything else. | ✅ Implemented, with heuristics and limits listed below |
+| **2. Music Separation** | Isolates Vocals, Drums, Bass, and Other using **Demucs** (`htdemucs`); a custom checkpoint can be loaded. No fine-tuned model is in the repo or verified yet. | Gives you the building blocks for creative mixing. You don't just hear the song—you see its ingredients. | 🔬 Separator code exists; the workspace uses pre-separated stems |
+| **3. Creative Workspace** | A local two-deck prototype: waveforms, segment timeline, 4-stem volume/mute/solo. Planned: beat-synced playback, loops, effects. | This is the "choir instructor" experience. You conduct the arrangement visually and audibly. | 🚧 Prototype (no beat-sync, loops or effects yet) |
 | **4. Creative Intelligence** | Suggests compatible sections between songs (BPM, Key, Chroma, Energy). Offers AI-assisted transition smoothing based on your fader moves. | Takes the guesswork out of mixing. The AI assists without taking over—you remain in control. | 📝 Conceptual Design (Algorithm definition) |
 
 ---
@@ -114,7 +114,15 @@ source venv/bin/activate  # or `venv\Scripts\activate` on Windows
 pip install -r requirements.txt
 ```
 
-### Extract SongDNA from an Audio File
+### Launch the Workspace (desktop app)
+
+```bash
+python run_workspace.py
+```
+
+Load an audio file or a saved package `.json` into Deck A or B. Stems are used only if a pre-separated set exists next to the audio file or in `data/demo_stems/<name>/`.
+
+### Extract SongDNA from an Audio File (command line)
 
 ```bash
 python main.py path/to/your/song.mp3
@@ -123,8 +131,37 @@ python main.py path/to/your/song.mp3
 ### Run Tests
 
 ```bash
+pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
+
+---
+
+## Current State and Known Limitations
+
+What the app shows today, and how far to trust it.
+
+**Measured (deterministic DSP, librosa at 22,050 Hz)**
+- Tempo and beat times (`librosa.beat.beat_track`). If no beats are found, the tempo is stored as a 120 BPM **fallback**, flagged `tempo_is_fallback`, and the UI shows "(fallback, not detected)".
+- Key, by Krumhansl–Schmuckler correlation of the mean chroma: an estimate for the whole mix (and per segment), not a guaranteed key. It has not been tested on vocal-only stems or non-Western tonal systems.
+- RMS, spectral and MFCC statistics per song and per segment.
+
+**Heuristic (simple measures, not validated)**
+- Structural segments: boundaries from MFCC novelty and clustering. This is **not section recognition**: every segment is labelled `UNKNOWN`, and the UI shows neutral names (S1, S2, …).
+- The comparison bar shows raw differences: tempo difference, keys with Camelot distance (0 = same key or relative major/minor), and a normalised RMS difference. None of these is a match or compatibility score.
+
+**Assumed (not detected)**
+- Bars and downbeats: every 4th detected beat is assumed to be a downbeat (4/4). Nothing detects downbeats or other metres. The data records this (`Timeline.downbeats_assumed`), and the timeline says so.
+
+**Not available**
+- Tempo confidence: none is computed, so it is stored as unknown (`None`).
+- Track metadata comes only from the audio file's own tags; missing fields show as unknown. No Spotify or other catalogue lookup is implemented. A future provider can plug into `CatalogueProvider`, but since late 2024 Spotify's audio-features/audio-analysis endpoints are restricted, so it would supply only basic catalogue data.
+
+**Workspace limitations**
+- Playback uses 5 independent Qt media players per deck (1 master + 4 stems) with nothing keeping them in sync, so stems can drift.
+- No live stem separation in the UI. It plays pre-separated stems only; `EchoSeparator` exists but needs PyTorch and Demucs installed and is not wired to a button.
+- Analysis runs on the UI thread, so the window freezes while a track is analysed.
+- No beat-sync, time-stretch, loops, crossfader, effects or recording yet.
 
 ---
 
@@ -140,9 +177,9 @@ python -m pytest tests/ -v
 
 | Pillar | Milestone | Deliverable | Status |
 | :--- | :--- | :--- | :--- |
-| **Understanding** | v0.1 – v0.2 | SongDNA domain, librosa extraction, optional Spotify enrichment. | ✅ Core done |
-| **Separation** | v0.3.5 | MUSDB18 + augmentations; fine-tuned Demucs with loss curves and SDR evaluation. | 🔬 In progress |
-| **Workspace** | v0.3 – v0.4 | Side-by-side UI, stem loading, beat-sync playback, loops, and effects. | 🚧 Design phase |
+| **Understanding** | v0.1 – v0.2 | SongDNA domain, librosa extraction, file-tag metadata. | ✅ Core done (no downbeat detection or section labels yet) |
+| **Separation** | v0.3.5 | Baseline `htdemucs` SDR evaluation (E003); fine-tuning with loss curves and SDR comparison. | 🔬 Baseline recorded; fine-tuning not yet verified |
+| **Workspace** | v0.3 – v0.4 | Side-by-side UI, stem loading, beat-sync playback, loops, and effects. | 🚧 Prototype: UI and pre-separated stems work |
 | **Intelligence** | v0.5 – v0.6 | Section compatibility, AI predictive smoothing, WAV export. | 📝 Planning |
 
 ---
